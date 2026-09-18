@@ -1,0 +1,46 @@
+# Piping rules applied deterministically by the Topology Agent and checked by the Validator.
+
+sizing:
+  target_velocity_m_s: 1.5
+  max_velocity_m_s: 2.5
+  dn_series: [25, 40, 50, 65, 80, 100, 125, 150, 200, 250]
+
+spec:
+  default: S1
+  description: "S1 — SS316L sanitary tube, orbital welded, CIP-able"
+
+valves:
+  - id: LR-PUMP-SUCTION
+    applies_to: pump_suction
+    type: butterfly_valve
+    class: manual
+    position: 0.75
+    rationale: Suction isolation so the pump can be maintained without draining the upstream system.
+
+  - id: LR-PUMP-DISCHARGE-NRV
+    applies_to: pump_discharge
+    type: check_valve
+    class: manual
+    position: 0.15
+    rationale: Non-return valve prevents back-flow through the stopped pump.
+
+  - id: LR-PUMP-DISCHARGE-ISO
+    applies_to: pump_discharge
+    type: butterfly_valve
+    class: manual
+    position: 0.3
+    rationale: Discharge isolation for pump maintenance.
+
+  - id: LR-MANIFOLD-ROUTE
+    applies_to: header_branch
+    type: on_off_valve
+    class: automated
+    position: 0.5
+    rationale: Automated route valve selects which unit is filled/emptied from the manifold.
+
+  - id: LR-BYPASS
+    applies_to: bypass
+    type: butterfly_valve
+    class: manual
+    position: 0.5
+    rationale: Normally-closed bypass valve, requested by reviewer.

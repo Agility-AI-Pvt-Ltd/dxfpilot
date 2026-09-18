@@ -1,0 +1,37 @@
+# Project tagging convention (prototype baseline — NOT a universal international rule).
+# Equipment/instrument letters follow common ISA-5.1 / ISO 14617 practice and are configurable,
+# so an NDDB or client convention can replace this file without code changes.
+
+equipment:
+  format: "{prefix}-{area}{seq:02d}"
+  prefixes:
+    centrifugal_pump: P
+    silo: T
+    duplex_strainer: F
+    deaeration_vessel: V
+    plate_heat_exchanger: E
+    pasteurizer: E
+    centrifugal_separator: S
+
+piping_nodes:
+  format: "{prefix}-{area}{seq:02d}"
+  prefixes:
+    header: HDR
+    tee: J
+    terminal_in: BL
+    terminal_out: BL
+
+lines:
+  # Stable tag; the drawn label adds nominal size and piping spec (see line_rules.yaml)
+  format: "{service}-{area}{seq:03d}"
+  label_format: "DN{dn}-{tag}-{spec}"
+
+instruments:
+  # Instruments in one measurement/control point share a loop number
+  format: "{function}-{area}{seq:02d}"
+
+valves:
+  manual:
+    format: "V-{area}{seq:03d}"
+  automated:
+    format: "XV-{area}{seq:02d}"

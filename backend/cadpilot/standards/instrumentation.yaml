@@ -1,0 +1,98 @@
+# Instrumentation & control rules. The Instrumentation Agent applies them; the Validator
+# re-checks every rule independently, so a rule can never be silently skipped.
+#
+# applies_to: equipment_type or stage
+# attach:     equipment | inlet_line | outlet_line
+# loop.final_element: utility_valve | upstream_pump_vfd | downstream_pump_vfd | outlet_diversion_valve
+
+rules:
+  - id: IR-DEAERATOR-LEVEL
+    applies_to: {equipment_type: deaeration_vessel}
+    attach: equipment
+    instruments:
+      - {function: LT, alarms: [LAL]}
+    loop: {controller: LIC, final_element: downstream_pump_vfd, setpoint: "50 %"}
+    rationale: Air-eliminator level controls unloading-pump speed so air is never drawn into the flow meter.
+
+  - id: IR-RECEPTION-FLOW
+    applies_to: {stage: unloading_pump}
+    attach: outlet_line
+    instruments:
+      - {function: FT, inline: flow_element}
+      - {function: FQI, location: dcs}
+    rationale: Quantity of milk received from each tanker must be measured and totalised.
+
+  - id: IR-PUMP-DISCHARGE-PRESSURE
+    applies_to: {equipment_type: centrifugal_pump}
+    attach: outlet_line
+    instruments:
+      - {function: PI}
+    rationale: Local discharge pressure indication for pump operation and troubleshooting.
+
+  - id: IR-STRAINER-DP
+    applies_to: {equipment_type: duplex_strainer}
+    attach: equipment
+    instruments:
+      - {function: PDI}
+    rationale: Differential pressure shows when the strainer basket must be changed over.
+
+  - id: IR-CHILLER-TEMP
+    applies_to: {equipment_type: plate_heat_exchanger}
+    attach: outlet_line
+    instruments:
+      - {function: TT, alarms: [TAH]}
+    loop: {controller: TIC, final_element: utility_valve, setpoint: "4 °C"}
+    rationale: Milk outlet temperature is controlled by the chilled-water valve to reach storage temperature.
+
+  - id: IR-SILO-LEVEL
+    applies_to: {equipment_type: silo}
+    attach: equipment
+    instruments:
+      - {function: LT, alarms: [LAH, LAL]}
+      - {function: LSHH}
+    rationale: Continuous level for inventory, independent high-high switch against overfilling.
+
+  - id: IR-SILO-TEMP
+    applies_to: {equipment_type: silo}
+    attach: equipment
+    instruments:
+      - {function: TT, alarms: [TAH]}
+    rationale: Stored raw milk temperature must be monitored (quality / microbial growth).
+
+  - id: IR-SEPARATOR-PRESSURE
+    applies_to: {equipment_type: centrifugal_separator}
+    attach: outlet_line
+    instruments:
+      - {function: PT}
+    rationale: Separator outlet back-pressure governs skimming efficiency.
+
+  - id: IR-PASTEURIZER-FLOW
+    applies_to: {equipment_type: pasteurizer}
+    attach: inlet_line
+    instruments:
+      - {function: FT, inline: flow_element}
+    loop: {controller: FIC, final_element: upstream_pump_vfd, setpoint: "design flow"}
+    rationale: Constant flow through the holding tube guarantees the holding time.
+
+  - id: IR-PASTEURIZER-TEMP
+    applies_to: {equipment_type: pasteurizer}
+    attach: equipment
+    instruments:
+      - {function: TT, alarms: [TAL]}
+    loop: {controller: TIC, final_element: utility_valve, setpoint: "72 °C"}
+    rationale: Pasteurization temperature is controlled by the hot-water valve.
+
+  - id: IR-PASTEURIZER-DIVERSION
+    applies_to: {equipment_type: pasteurizer}
+    attach: outlet_line
+    instruments:
+      - {function: TSL}
+    loop: {controller: TSL, final_element: outlet_diversion_valve, kind: interlock, setpoint: "< 72 °C"}
+    rationale: Under-pasteurized milk must be diverted automatically (flow diversion valve interlock).
+
+symbols:
+  field: instrument_field
+  dcs: instrument_dcs
+  local_panel: instrument_panel
+  utility_valve: control_valve
+  diversion_valve: flow_diversion_valve

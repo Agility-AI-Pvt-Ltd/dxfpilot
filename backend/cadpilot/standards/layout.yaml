@@ -1,0 +1,13 @@
+# Deterministic layout parameters (drawing units ≈ px at 100 % zoom)
+
+margin: 80
+row_height: 270
+min_gap: 70
+line_label_width: 110      # space reserved at the start of a pipe run for its line number
+inline_pitch: 50           # space per valve / inline element on a pipe run
+instrument_side_width: 60  # tall vessels carry their instruments at the side
+instrument_offset_y: 120
+instrument_spacing_x: 42
+bypass_offset_y: 80
+title_block_height: 110
+sheet_min_width: 1600

@@ -1,0 +1,30 @@
+# Deterministic validation configuration.
+
+data:
+  # Mass balance ↔ design data consistency
+  reception_max_hours_per_day: 8
+  processing_max_hours_per_day: 20
+  raw_storage_min_fraction_of_daily_intake: 0.5
+  max_line_velocity_m_s: 2.5
+
+topology:
+  # A continuous process path must exist from every inlet battery limit to an outlet battery limit
+  require_inlet_to_outlet_path: true
+  # Every equipment item must be connected on both process sides (terminals excepted)
+  require_inlet_and_outlet: true
+
+engineering:
+  # Process-order constraints: [upstream stage, downstream stage, reason]. Violations are
+  # warnings — a reviewer may deliberately deviate, but is told why the rule exists.
+  order_constraints:
+    - [raw_milk_chiller, raw_milk_silo, "Received milk must be chilled before storage"]
+    - [deaerator, unloading_pump, "Air must be removed before the pump and flow meter"]
+    - [process_strainer, separator, "The separator must be protected by the strainer"]
+    - [separator, pasteurizer, "Milk is clarified/standardized ahead of the holding section"]
+    - [raw_milk_silo, pasteurizer, "Pasteurization is fed from raw milk storage"]
+  enforce_instrumentation_rules: true
+  enforce_line_rules: true
+  # A reviewer may waive a rule by removing its item; the waiver is recorded and reported as info
+  allow_reviewer_waivers: true
+
+severity_overrides: {}

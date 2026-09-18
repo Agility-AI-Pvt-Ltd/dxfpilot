@@ -1,0 +1,128 @@
+# Controlled symbol library. The LLM only ever selects a symbol id; geometry comes from here.
+# Graphics are SVG fragments centred on (0,0), styled by CSS classes in the renderer.
+# Shapes are ISO 10628-2-inspired placeholders — replace with the client's symbol library.
+# Ports: position relative to centre and the side the pipe leaves from.
+
+equipment:
+  silo:
+    engineering_type: vertical_storage_tank
+    size: [70, 150]
+    ports:
+      inlet: {x: -35, y: -50, side: left}
+      outlet: {x: 35, y: 58, side: right}
+    graphics: |
+      <path class="sym" d="M-35,-60 Q-35,-75 0,-75 Q35,-75 35,-60 L35,60 L0,75 L-35,60 Z"/>
+      <line class="sym-thin" x1="-35" y1="-40" x2="35" y2="-40"/>
+      <line class="sym-thin" x1="-28" y1="66" x2="-28" y2="82"/><line class="sym-thin" x1="28" y1="66" x2="28" y2="82"/>
+
+  centrifugal_pump:
+    engineering_type: centrifugal_pump
+    size: [44, 44]
+    ports:
+      inlet: {x: -20, y: 0, side: left}
+      outlet: {x: 20, y: -16, side: right}
+    graphics: |
+      <circle class="sym" r="20"/>
+      <path class="sym" d="M0,-20 L20,-20 L20,-12"/>
+      <path class="sym" d="M-14,20 L-20,28 L20,28 L14,20"/>
+      <path class="sym-fill" d="M-7,-9 L10,0 L-7,9 Z"/>
+
+  duplex_strainer:
+    engineering_type: strainer
+    size: [44, 36]
+    ports:
+      inlet: {x: -22, y: 0, side: left}
+      outlet: {x: 22, y: 0, side: right}
+    graphics: |
+      <rect class="sym" x="-22" y="-16" width="44" height="32" rx="3"/>
+      <path class="sym-thin" d="M-16,-10 L-6,10 M-6,-10 L-16,10 M6,-10 L16,10 M16,-10 L6,10"/>
+      <line class="sym-thin" x1="0" y1="-16" x2="0" y2="16"/>
+
+  deaeration_vessel:
+    engineering_type: vessel
+    size: [40, 80]
+    ports:
+      inlet: {x: -20, y: -18, side: left}
+      outlet: {x: 20, y: 26, side: right}
+    graphics: |
+      <path class="sym" d="M-20,-28 Q-20,-40 0,-40 Q20,-40 20,-28 L20,28 Q20,40 0,40 Q-20,40 -20,28 Z"/>
+      <path class="sym-thin" d="M0,-40 L0,-54 M-6,-54 L6,-54"/>
+
+  plate_heat_exchanger:
+    engineering_type: plate_heat_exchanger
+    size: [44, 64]
+    ports:
+      inlet: {x: -22, y: 0, side: left}
+      outlet: {x: 22, y: 0, side: right}
+    graphics: |
+      <rect class="sym" x="-22" y="-32" width="44" height="64"/>
+      <path class="sym-thin" d="M-22,-32 L22,32 M-10,-32 L-10,32 M0,-32 L0,32 M10,-32 L10,32"/>
+
+  pasteurizer:
+    engineering_type: plate_heat_exchanger_htst
+    size: [96, 72]
+    ports:
+      inlet: {x: -48, y: 10, side: left}
+      outlet: {x: 48, y: 10, side: right}
+    graphics: |
+      <rect class="sym" x="-48" y="-26" width="96" height="62"/>
+      <path class="sym-thin" d="M-30,-26 L-30,36 M-15,-26 L-15,36 M0,-26 L0,36 M15,-26 L15,36 M30,-26 L30,36"/>
+      <path class="sym-thin" d="M-36,-26 L-36,-36 L-24,-36 L-24,-30 M-12,-26 L-12,-36 L0,-36 L0,-30 L12,-30 L12,-36 L24,-36 L24,-26"/>
+
+  centrifugal_separator:
+    engineering_type: centrifugal_separator
+    size: [60, 72]
+    ports:
+      inlet: {x: -30, y: -14, side: left}
+      outlet: {x: 30, y: -14, side: right}
+    graphics: |
+      <path class="sym" d="M-30,-26 L30,-26 L12,14 L-12,14 Z"/>
+      <rect class="sym" x="-14" y="14" width="28" height="20"/>
+      <circle class="sym-thin" cx="0" cy="24" r="6"/>
+      <line class="sym-thin" x1="0" y1="-26" x2="0" y2="-36"/>
+
+piping_nodes:
+  terminal_in:
+    size: [120, 26]
+    ports:
+      outlet: {x: 60, y: 0, side: right}
+  terminal_out:
+    size: [120, 26]
+    ports:
+      inlet: {x: -60, y: 0, side: left}
+
+inline:
+  butterfly_valve:
+    graphics: |
+      <path class="sym-bg" d="M-9,-7 L9,7 L9,-7 L-9,7 Z"/>
+      <line class="sym-thin" x1="0" y1="-7" x2="0" y2="7"/>
+      <circle class="sym-fill" r="2.5"/>
+  check_valve:
+    graphics: |
+      <path class="sym-bg" d="M-9,-7 L9,7 L9,-7 L-9,7 Z"/>
+      <path class="sym-fill" d="M-9,-7 L0,0 L-9,7 Z"/>
+  on_off_valve:
+    graphics: |
+      <path class="sym-bg" d="M-9,-7 L9,7 L9,-7 L-9,7 Z"/>
+      <line class="sym-thin" x1="0" y1="0" x2="0" y2="-14"/>
+      <rect class="sym-bg" x="-6" y="-22" width="12" height="8"/>
+  control_valve:
+    graphics: |
+      <path class="sym-bg" d="M-9,-7 L9,7 L9,-7 L-9,7 Z"/>
+      <line class="sym-thin" x1="0" y1="0" x2="0" y2="-14"/>
+      <path class="sym-bg" d="M-9,-14 Q0,-26 9,-14 Z"/>
+  flow_diversion_valve:
+    graphics: |
+      <path class="sym-bg" d="M-9,-7 L9,7 L9,-7 L-9,7 Z"/>
+      <path class="sym-bg" d="M0,0 L-7,14 L7,14 Z"/>
+      <line class="sym-thin" x1="0" y1="0" x2="0" y2="-14"/>
+      <path class="sym-bg" d="M-9,-14 Q0,-26 9,-14 Z"/>
+  flow_element:
+    graphics: |
+      <rect class="sym-bg" x="-10" y="-8" width="20" height="16"/>
+      <path class="sym-thin" d="M-6,5 L-6,-5 L0,2 L6,-5 L6,5"/>
+
+instrument_bubbles:
+  instrument_field: {shape: circle, r: 16}
+  instrument_dcs: {shape: circle_in_square, r: 16}
+  instrument_panel: {shape: circle_line, r: 16}
