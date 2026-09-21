@@ -4,10 +4,26 @@ sizing:
   target_velocity_m_s: 1.5
   max_velocity_m_s: 2.5
   dn_series: [25, 40, 50, 65, 80, 100, 125, 150, 200, 250]
+  # services that are not milk-like liquids (engineering modules)
+  services:
+    ST: {density_kg_m3: 5.2, target_velocity_m_s: 25, max_velocity_m_s: 35, flow_unit: kg/h}   # saturated steam ~10 bar(g)
+    CON: {flow_unit: kg/h}                                        # condensate
+    BFW: {flow_unit: kg/h}                                        # boiler feed water
+    PKD: {size: false}                                            # packed product (conveyor, not a pipe)
 
 spec:
   default: S1
   description: "S1 — SS316L sanitary tube, orbital welded, CIP-able"
+  by_service:
+    ST: S3        # carbon steel, IBR, insulated
+    CON: S4       # carbon steel, insulated
+    BFW: S4
+    HWS: S5       # MS / GI, insulated
+    HWR: S5
+    CHWS: S5
+    CHWR: S5
+    CHM: S6       # PP / PVDF chemical line
+    PKD: "-"
 
 valves:
   - id: LR-PUMP-SUCTION
@@ -32,7 +48,8 @@ valves:
     rationale: Discharge isolation for pump maintenance.
 
   - id: LR-MANIFOLD-ROUTE
-    applies_to: header_branch
+    # product manifolds only: steam, condensate and water mains are isolated, not routed
+    applies_to: {header_branch: true, not_service: [ST, CON, BFW, HWS, HWR, CHWS, CHWR]}
     type: on_off_valve
     class: automated
     position: 0.5

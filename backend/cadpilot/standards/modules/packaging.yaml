@@ -1,0 +1,112 @@
+# Engineering module 10 — Milk packaging (pouch filling)
+# Pasteurized milk → re-chiller → filler overhead (product) tanks → pouch filling machines →
+# packed pouches to crating / cold store.
+
+id: packaging
+name: Milk packaging
+order: 10
+area: "10"
+area_name: Liquid milk packaging
+# Excel section headings where this module's equipment is listed (rows there are preferred)
+sections: [pouch filling, packing]
+keywords: [packaging, packing, pouch, filler, filling]
+summary: Product tank → filler → packaging
+
+groups:
+  pk_in: {default_count: 1}
+  pk_chill: {lead_stage: pk_rechiller, flow_stage: pk_rechiller, default_count: 2}
+  pk_lines: {lead_stage: pk_filler, default_count: 4}
+
+stages:
+  - id: pk_milk_in
+    name: Pasteurized milk from storage
+    kind: terminal_in
+    group: pk_in
+    label: PASTEURIZED MILK FROM PMST
+    outlet_service: PM
+    function: Battery limit — standardized pasteurized milk for packing
+
+  - id: pk_rechiller
+    name: Milk re-chiller for pouch filling
+    kind: equipment
+    equipment_type: plate_heat_exchanger
+    group: pk_chill
+    match: [milk re-chiller for pouch filling]
+    default_capacity: {value: 30, unit: KLPH}
+    attributes: {utility: chilled water, duty: "→ 3–4 °C"}
+    function: Re-chill milk just before filling
+
+  - id: pk_overhead_tank
+    name: Filler overhead (product) tank
+    kind: equipment
+    equipment_type: product_tank
+    group: pk_lines
+    default_capacity: {value: 500, unit: L}
+    function: Constant head for the filling machine
+
+  - id: pk_filler
+    name: Pouch filling machine
+    kind: equipment
+    equipment_type: filler
+    group: pk_lines
+    match: [pouch filling machines, liquid milk]
+    default_capacity: {value: 10000, unit: PPH}
+    attributes: {design_flow_klph: 5}   # 10 000 pouches/h × 0.5 L
+    outlet_service: PKD
+    function: Form, fill and seal 500 ml / 1 L pouches
+
+  - id: pk_out
+    name: Packed pouches out
+    kind: terminal_out
+    group: pk_lines
+    label: PACKED POUCHES TO CRATING / COLD STORE
+    function: Battery limit — packed product (conveyor, not a pipe)
+
+services:
+  PM: {name: Pasteurized milk, fluid: pasteurized milk}
+  PKD: {name: Packed product, fluid: pouches}
+
+symbols:
+  product_tank:
+    same_as: vessel_tank
+    engineering_type: filler_overhead_tank
+  filler:
+    engineering_type: form_fill_seal_machine
+    size: [84, 68]
+    ports:
+      inlet: {x: -42, y: -18, side: left}
+      outlet: {x: 42, y: 18, side: right}
+    graphics: |
+      <rect class="sym" x="-42" y="-26" width="84" height="60"/>
+      <path class="sym" d="M-30,-26 L-20,-40 L20,-40 L30,-26"/>
+      <path class="sym-thin" d="M-24,34 L-24,22 M-8,34 L-8,22 M8,34 L8,22 M24,34 L24,22"/>
+      <path class="sym-thin" d="M-30,4 L30,4"/>
+
+tag_prefixes:
+  product_tank: T
+  filler: PK
+
+instrumentation_rules:
+  - id: IR-PK-OVERHEAD-LEVEL
+    applies_to: {equipment_type: product_tank}
+    attach: equipment
+    instruments:
+      - {function: LT, alarms: [LAL]}
+      - {function: LSL}
+    loop: {controller: LIC, final_element: inlet_control_valve, setpoint: "70 %"}
+    rationale: Constant head gives constant fill volume; low level stops the filler.
+
+  - id: IR-PK-FILL-TEMP
+    applies_to: {stage: pk_overhead_tank}
+    attach: inlet_line
+    instruments:
+      - {function: TI}
+    rationale: Filling temperature must stay ≤ 4 °C (shelf life).
+
+line_rules:
+  - id: LR-PK-FILLER-INLET
+    applies_to: {to_type: [filler]}
+    type: on_off_valve
+    class: automated
+    position: 0.5
+    rationale: Automated inlet valve closes when the filler stops (no product under a stopped jaw).

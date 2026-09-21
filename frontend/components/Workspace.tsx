@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, streamPost, type Project, type ProgressEvent, type Revision } from "@/lib/api";
+import { api, streamPost, type Engine, type Project, type ProgressEvent, type Revision } from "@/lib/api";
 import Chat from "./Chat";
 import DataPanel from "./DataPanel";
 import Inspector from "./Inspector";
@@ -11,11 +11,19 @@ import Sidebar from "./Sidebar";
 
 type Tab = "drawing" | "validation" | "changes" | "lists" | "decisions";
 
-type Props = { projectId: string; initialRequest: string; onExit: () => void; onOpenProject: (id: string) => void };
+type Props = {
+  projectId: string;
+  initialRequest: string;
+  initialEngine?: Engine;
+  initialModules?: string[];
+  initialDetect?: boolean;
+  onExit: () => void;
+  onOpenProject: (id: string) => void;
+};
 
 const SIDEBAR_KEY = "cadpilot.sidebar";
 
-export default function Workspace({ projectId, initialRequest, onExit, onOpenProject }: Props) {
+export default function Workspace({ projectId, initialRequest, initialEngine, initialModules, initialDetect, onExit, onOpenProject }: Props) {
   const [project, setProject] = useState<Project | null>(null);
   const [revLetter, setRevLetter] = useState<string | null>(null);
   const [rev, setRev] = useState<Revision | null>(null);
@@ -95,10 +103,15 @@ export default function Workspace({ projectId, initialRequest, onExit, onOpenPro
     started.current = true;
     refresh().then((p) => {
       if (p.current) return;
-      if (p.source_summary?.equipment_rows) run(`/api/projects/${projectId}/generate`, { request: initialRequest || "Generate the P&ID" });
+      if (p.source_summary?.equipment_rows) run(`/api/projects/${projectId}/generate`, {
+          request: initialRequest || "Generate the P&ID",
+          engine: initialEngine,
+          modules: initialModules,
+          detect_modules: !!initialDetect,
+        });
       else setShowData(true); // no usable data yet: ask for the workbooks
     });
-  }, [projectId, initialRequest, refresh, run]);
+  }, [projectId, initialRequest, initialEngine, initialModules, initialDetect, refresh, run]);
 
   const send = (text?: string) => {
     const msg = (text ?? input).trim();
@@ -272,8 +285,10 @@ export default function Workspace({ projectId, initialRequest, onExit, onOpenPro
           project={project}
           onClose={() => setShowData(false)}
           onUploaded={setProject}
-          onRegenerate={() =>
+          onRegenerate={(engine, modules) =>
             run(`/api/projects/${projectId}/generate`, {
+              engine,
+              modules,
               request: project.current ? "Regenerate the draft from the updated design data" : initialRequest || "Generate the P&ID",
             })
           }

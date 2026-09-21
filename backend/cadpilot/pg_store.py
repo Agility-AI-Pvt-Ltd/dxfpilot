@@ -26,7 +26,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from .ingest.excel import SourceData
+from .ingest.excel import SourceData, TableOverride
 from .model.engineering import ProjectInfo
 from .model.intent import ChangeRequest, DesignIntent
 from .engine.tags import TagRegistry
@@ -145,6 +145,12 @@ MIGRATIONS: list[tuple[int, str]] = [
         CREATE INDEX llm_calls_project ON llm_calls (project_id, id);
         """,
     ),
+    (
+        3,
+        """
+        ALTER TABLE projects ADD COLUMN table_overrides jsonb NOT NULL DEFAULT '[]';
+        """,
+    ),
 ]
 
 
@@ -171,6 +177,11 @@ class PostgresStore(ProjectStore):
         self.pool = ConnectionPool(
             url, min_size=min_size, max_size=max_size, configure=configure,
             kwargs={"row_factory": dict_row}, open=True,
+            # Validate each connection before handing it out, so a database restart (deploy,
+            # container recreation) is survived without restarting the API.
+            check=ConnectionPool.check_connection,
+            reconnect_timeout=60,
+            timeout=15,  # fail a request after 15 s instead of hanging when the database is down
         )
         self.migrate()
 
@@ -238,6 +249,7 @@ class PostgresStore(ProjectStore):
             sources=files,
             intent=DesignIntent.model_validate(p["intent"]),
             registry=TagRegistry.model_validate(p["tag_registry"]),
+            table_overrides=[TableOverride.model_validate(o) for o in p["table_overrides"]],
             revisions=revs,
             chat=[
                 ChatMessage(role=m["role"], text=m["text"], at=_iso(m["created_at"]), revision=m["revision"], data=m["data"])
@@ -254,8 +266,10 @@ class PostgresStore(ProjectStore):
     def _save(self, conn: Connection, rec: ProjectRecord) -> None:
         pid = rec.info.id
         cur = conn.execute(
-            "UPDATE projects SET name = %s, info = %s, intent = %s, tag_registry = %s, updated_at = now() WHERE id = %s",
-            (rec.info.name, _j(rec.info), _j(rec.intent), _j(rec.registry), pid),
+            "UPDATE projects SET name = %s, info = %s, intent = %s, tag_registry = %s, table_overrides = %s,"
+            " updated_at = now() WHERE id = %s",
+            (rec.info.name, _j(rec.info), _j(rec.intent), _j(rec.registry),
+             Jsonb([o.model_dump(mode="json") for o in rec.table_overrides]), pid),
         )
         if cur.rowcount == 0:
             raise KeyError(pid)

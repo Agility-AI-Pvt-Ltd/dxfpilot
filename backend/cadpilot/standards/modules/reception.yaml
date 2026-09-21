@@ -1,0 +1,90 @@
+# Engineering module 1 — Milk reception
+# Road tankers → strainer → de-aeration → unloading pump (metered) → chiller → raw milk silos.
+# The shared rules for pumps, strainers, de-aerators, chillers and silos live in
+# instrumentation.yaml / line_rules.yaml; this module adds only what is specific to it.
+
+id: reception
+name: Milk reception
+order: 1
+area: "1"
+area_name: Milk reception & raw milk storage
+# Excel section headings where this module's equipment is listed (rows there are preferred)
+sections: [reception]
+keywords: [reception, tanker, raw milk, silo, rmst, unloading]
+summary: Tankers → reception → filtration → storage
+
+groups:
+  # lead_stage: the design-data quantity of this stage sets the number of parallel trains
+  # flow_stage: the pump whose capacity sets each train's design flow
+  reception: {lead_stage: unloading_pump, flow_stage: unloading_pump, default_count: 2}
+  storage: {lead_stage: raw_milk_silo, default_count: 3}
+  rc_out: {default_count: 1}
+
+stages:
+  - id: tanker_inlet
+    name: Road milk tanker unloading point
+    kind: terminal_in
+    group: reception
+    label: FROM ROAD MILK TANKER
+    outlet_service: RM
+    function: Battery limit — tanker unloading hose connection
+
+  - id: reception_strainer
+    name: Reception duplex strainer
+    kind: equipment
+    equipment_type: duplex_strainer
+    group: reception
+    match: [inline strainer, manual changeover]
+    default_capacity: {value: 40, unit: KLPH}
+    function: Remove extraneous matter from received milk
+
+  - id: deaerator
+    name: Milk de-aeration vessel
+    kind: equipment
+    equipment_type: deaeration_vessel
+    group: reception
+    optional: true
+    match: [de-aeration vessel]
+    default_capacity: {value: 200, unit: L}
+    function: Remove entrained air ahead of volumetric metering
+
+  - id: unloading_pump
+    name: Tanker unloading pump
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: reception
+    match: [tanker unloading pump]
+    default_capacity: {value: 40, unit: KLPH}
+    attributes: {drive: VFD}
+    function: Unload milk from road tanker
+
+  - id: raw_milk_chiller
+    name: Raw milk chiller
+    kind: equipment
+    equipment_type: plate_heat_exchanger
+    group: reception
+    optional: true
+    match: [raw milk chiller]
+    default_capacity: {value: 40, unit: KLPH}
+    attributes: {duty: "10 → 4 °C", utility: chilled water}
+    function: Chill received milk to storage temperature
+
+  - id: raw_milk_silo
+    name: Raw milk storage silo (RMST)
+    kind: equipment
+    equipment_type: silo
+    group: storage
+    match: [raw milk storage silo]
+    default_capacity: {value: 100, unit: KL}
+    function: Store chilled raw milk
+
+  - id: rmst_outlet
+    name: Raw milk to pasteurization
+    kind: terminal_out
+    group: rc_out
+    label: RAW MILK TO PASTEURIZATION
+    connects_to: pz_raw_milk_in
+    function: Battery limit — raw milk from the silo outlet manifold to the pasteurization section
+
+services:
+  RM: {name: Raw milk, fluid: raw milk}

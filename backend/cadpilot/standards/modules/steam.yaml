@@ -1,0 +1,173 @@
+# Engineering module 4 — Steam generation and distribution
+# Boilers → steam header → pressure-reducing station → LP steam header → one take-off per steam user
+# found in the other modules. Condensate return: condensate tank → boiler feed pumps → boilers.
+
+id: steam
+name: Steam
+order: 4
+area: "4"
+area_name: Steam generation & distribution
+# Excel section headings where this module's equipment is listed (rows there are preferred)
+sections: [steam]
+keywords: [steam, boiler, condensate]
+summary: Boiler → steam header → process users
+utility: steam
+
+groups:
+  st_boilers: {lead_stage: st_boiler, flow_stage: st_boiler, default_count: 2}
+  st_prv: {default_count: 1}
+  st_users: {default_count: 1}
+  st_cond: {default_count: 1}
+  # feed water follows the boilers' steaming rate (the pumps are sized with margin above it)
+  st_feed: {lead_stage: st_feed_pump, flow_stage: st_boiler, default_count: 2}
+
+stages:
+  - id: st_boiler
+    name: Steam boiler
+    kind: equipment
+    equipment_type: boiler
+    group: st_boilers
+    match: [boiler, blow down]
+    default_capacity: {value: 8, unit: t/h}
+    outlet_service: ST
+    function: Generate saturated steam at 10.5 kg/cm²(g)
+
+  - id: st_prv_station
+    name: Pressure reducing station
+    kind: equipment
+    equipment_type: prv_station
+    group: st_prv
+    default_capacity: {value: 16, unit: t/h}
+    function: Reduce HP steam to the process pressure
+
+  - id: st_users
+    name: LP steam to process users
+    kind: terminal_out
+    group: st_users
+    utility_users: steam
+    label: STEAM TO
+    function: Battery limit — steam take-off to a consumer
+
+  # ---- condensate return / boiler feed ------------------------------------------------------------
+  - id: st_condensate_in
+    name: Condensate return
+    kind: terminal_in
+    group: st_cond
+    branch: feed
+    label: CONDENSATE RETURN FROM PLANT
+    outlet_service: CON
+    function: Battery limit — condensate from the steam traps of all users
+
+  - id: st_condensate_tank
+    name: Condensate / feed water tank
+    kind: equipment
+    equipment_type: condensate_tank
+    group: st_cond
+    branch: feed
+    match: [condensate collection]
+    default_capacity: {value: 10, unit: KL}
+    function: Collect condensate and make-up water as boiler feed
+
+  - id: st_feed_pump
+    name: Boiler feed pump
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: st_feed
+    branch: feed
+    default_capacity: {value: 10, unit: KLPH}
+    attributes: {drive: VFD}
+    outlet_service: BFW
+    feeds: st_boiler
+    function: Feed water to each boiler on drum-level demand
+
+services:
+  ST: {name: Steam, fluid: saturated steam}
+  CON: {name: Condensate, fluid: condensate}
+  BFW: {name: Boiler feed water, fluid: treated water}
+
+symbols:
+  boiler:
+    engineering_type: fire_tube_boiler
+    size: [112, 64]
+    ports:
+      inlet: {x: -36, y: 32, side: bottom}
+      outlet: {x: 56, y: -16, side: right}
+    graphics: |
+      <rect class="sym" x="-56" y="-32" width="112" height="64" rx="30"/>
+      <path class="sym-thin" d="M-40,-10 L40,-10 M-40,10 L40,10"/>
+      <path class="sym" d="M-56,-10 L-70,-10 L-70,10 L-56,10"/>
+      <line class="sym-thin" x1="0" y1="-32" x2="0" y2="-44"/>
+  prv_station:
+    engineering_type: pressure_reducing_station
+    size: [44, 44]
+    ports:
+      inlet: {x: -20, y: 0, side: left}
+      outlet: {x: 20, y: 0, side: right}
+    graphics: |
+      <path class="sym" d="M-20,-12 L20,12 L20,-12 L-20,12 Z"/>
+      <path class="sym-thin" d="M0,0 L0,-18 M-8,-18 L8,-18 M-6,-22 L6,-26 L-6,-30 L6,-34"/>
+  condensate_tank:
+    same_as: vessel_tank
+    engineering_type: condensate_tank
+
+tag_prefixes:
+  boiler: B
+  prv_station: PRV
+  condensate_tank: T
+
+instrumentation_rules:
+  - id: IR-ST-BOILER-PRESSURE
+    applies_to: {equipment_type: boiler}
+    attach: equipment
+    instruments:
+      - {function: PT, alarms: [PAH]}
+      - {function: PSV}
+    loop: {controller: PIC, final_element: utility_valve, setpoint: "10.5 kg/cm²(g)"}
+    rationale: Steam pressure is held by the burner firing rate; a safety valve protects the shell (IBR).
+
+  - id: IR-ST-BOILER-LEVEL
+    applies_to: {equipment_type: boiler}
+    attach: equipment
+    instruments:
+      - {function: LT, alarms: [LAL]}
+      - {function: LSLL}
+    loop: {controller: LIC, final_element: upstream_pump_vfd, setpoint: "NWL"}
+    rationale: Drum level is held by the feed pump; low-low level trips the burner (dry-firing protection).
+
+  - id: IR-ST-PRV-PRESSURE
+    applies_to: {equipment_type: prv_station}
+    attach: outlet_line
+    instruments:
+      - {function: PI}
+      - {function: PSV}
+    rationale: LP header pressure is shown after the PRV; a relief valve protects the LP side if the PRV fails open.
+
+  - id: IR-ST-CONDENSATE-LEVEL
+    applies_to: {equipment_type: condensate_tank}
+    attach: equipment
+    instruments:
+      - {function: LT, alarms: [LAL, LAH]}
+      - {function: TT}
+    rationale: Feed-tank level controls make-up water and protects the feed pumps; temperature shows flash losses.
+
+line_rules:
+  - id: LR-ST-BOILER-NRV
+    applies_to: {from_type: [boiler]}
+    type: check_valve
+    class: manual
+    position: 0.2
+    rationale: Non-return valve on each boiler outlet so a stopped boiler is not back-fed from the header.
+
+  - id: LR-ST-BOILER-MSV
+    applies_to: {from_type: [boiler]}
+    type: globe_valve
+    class: manual
+    position: 0.35
+    rationale: Main steam stop valve on each boiler (IBR).
+
+  - id: LR-ST-USER-ISOLATION
+    applies_to: {to_type: [terminal_out], service: [ST]}
+    type: globe_valve
+    class: manual
+    position: 0.6
+    rationale: Isolation valve on every steam take-off.

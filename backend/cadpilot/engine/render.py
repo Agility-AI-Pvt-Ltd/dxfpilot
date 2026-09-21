@@ -10,7 +10,7 @@ from collections import defaultdict
 from datetime import date
 from html import escape
 
-from ..model.engineering import EngineeringModel, Instrument, Line
+from ..model.engineering import EngineeringModel, Instrument, LayoutPoint, Line
 from ..standards import Standards
 from .tags import Tagger, TagRegistry
 
@@ -60,7 +60,9 @@ class _Renderer:
         self.m = model
         self.s = standards
         self.hl = highlight
-        self.pos = model.layout.positions
+        # an item the layout could not place (e.g. a planned header connected to nothing) is still drawn
+        self.pos = {t: model.layout.positions.get(t) or LayoutPoint(x=40, y=40) for t in
+                    [e.tag for e in model.equipment] + [n.tag for n in model.piping_nodes]} | dict(model.layout.positions)
         self.kinds = {e.tag: e.type for e in model.equipment} | {n.tag: n.kind for n in model.piping_nodes}
         self.out: list[str] = []
         self.routes: dict[str, list[Pt]] = {}
@@ -78,7 +80,7 @@ class _Renderer:
         return 8, 8
 
     def port(self, tag: str, port: str) -> Pt:
-        p = self.pos[tag]
+        p = self.pos.get(tag) or LayoutPoint(x=40, y=40)
         spec = self.s.ports_for(self.kinds.get(tag, "")).get(port)
         if spec:
             return p.x + spec["x"], p.y + spec["y"]
@@ -126,14 +128,16 @@ class _Renderer:
         for n in self.m.piping_nodes:
             if n.kind not in ("header", "tee"):
                 by_area[n.area].append(n.tag)
-        pad_x, pad_top, pad_bot = 40, 150, 90
+        pad_x, pad_top = 40, 150
         boxes = []
-        for area, tags in sorted(by_area.items()):
+        for area, tags in sorted(by_area.items(), key=lambda kv: (len(kv[0]), kv[0])):
             xs = [self.pos[t].x - self.size(t)[0] / 2 for t in tags] + [self.pos[t].x + self.size(t)[0] / 2 for t in tags]
             ys = [self.pos[t].y for t in tags]
-            boxes.append([area, min(xs) - pad_x, min(ys) - pad_top, max(xs) + pad_x, max(ys) + pad_bot])
-        for i in range(len(boxes) - 1):  # no overlap between adjacent areas
-            if boxes[i][3] > boxes[i + 1][1] - 6:
+            bottom = max(self.pos[t].y + self.size(t)[1] / 2 + 52 for t in tags)  # below the tag and name
+            boxes.append([area, min(xs) - pad_x, min(ys) - pad_top, max(xs) + pad_x, max(bottom, max(ys) + 90)])
+        for i in range(len(boxes) - 1):  # no overlap between side-by-side areas (module bands stack)
+            same_band = boxes[i][2] < boxes[i + 1][4] and boxes[i + 1][2] < boxes[i][4]
+            if same_band and boxes[i][3] > boxes[i + 1][1] - 6:
                 midx = (boxes[i][3] + boxes[i + 1][1]) / 2
                 boxes[i][3], boxes[i + 1][1] = midx - 3, midx + 3
         for area, x0, y0, x1, y1 in boxes:
@@ -226,20 +230,20 @@ class _Renderer:
                     f'<circle class="sym-fill" cx="{_f(p.x)}" cy="{_f(p.y)}" r="3.5"/></g>'
                 )
             elif n.kind in ("terminal_in", "terminal_out"):
-                w, h = 120, 26
+                rows = _wrap(n.label, 19, 3)
+                w, h = 120, max(26, 11 * len(rows) + 6)
                 x0 = p.x - w / 2
                 shape = (
                     f"M{_f(x0)},{_f(p.y - h / 2)} L{_f(x0 + w - 12)},{_f(p.y - h / 2)} L{_f(x0 + w)},{_f(p.y)} "
                     f"L{_f(x0 + w - 12)},{_f(p.y + h / 2)} L{_f(x0)},{_f(p.y + h / 2)} Z"
                 )
-                words = n.label.split()
-                half = (len(words) + 1) // 2
-                l1, l2 = " ".join(words[:half]), " ".join(words[half:])
+                y_first = p.y - (len(rows) - 1) * 5.5 + 3.5
+                text = "".join(
+                    f'<text class="sub" x="{_f(x0 + 6)}" y="{_f(y_first + k * 11)}">{escape(row)}</text>' for k, row in enumerate(rows)
+                )
                 self.out.append(
                     f'<g class="{self.cls("item", n.tag)}" data-tag="{escape(n.tag)}" data-kind="piping_node">'
-                    f'<path class="sym" d="{shape}"/>'
-                    f'<text class="sub" x="{_f(x0 + 6)}" y="{_f(p.y - 2)}">{escape(l1)}</text>'
-                    f'<text class="sub" x="{_f(x0 + 6)}" y="{_f(p.y + 9)}">{escape(l2)}</text>'
+                    f'<path class="sym" d="{shape}"/>{text}'
                     f'<text class="tag" x="{_f(p.x)}" y="{_f(p.y - h / 2 - 6)}" text-anchor="middle">{escape(n.tag)}</text></g>'
                 )
 
@@ -373,6 +377,19 @@ class _Renderer:
             f'width="{_f(W)}" height="{_f(H)}"><style>{STYLE}</style>'
             f'<rect class="sheet" x="0" y="0" width="{_f(W)}" height="{_f(H)}"/>' + "".join(self.out) + "</svg>"
         )
+
+
+def _wrap(text: str, width: int, max_rows: int) -> list[str]:
+    """Word-wrap a battery-limit label into its box (the last row is shortened with … if needed)."""
+    rows: list[str] = []
+    for word in text.split():
+        if rows and len(rows[-1]) + 1 + len(word) <= width:
+            rows[-1] += f" {word}"
+        else:
+            rows.append(word)
+    if len(rows) > max_rows:
+        rows = rows[: max_rows - 1] + [" ".join(rows[max_rows - 1:])]
+    return [r if len(r) <= width else r[: width - 1] + "…" for r in rows] or [""]
 
 
 def _short(name: str) -> str:

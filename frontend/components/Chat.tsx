@@ -7,10 +7,12 @@ import type { ChatMessage, LLMCallSummary, ProgressEvent } from "@/lib/api";
 function Source({ interpreter, llm }: { interpreter?: string; llm?: LLMCallSummary[] }) {
   if (!interpreter && !llm) return null;
   const ok = (llm ?? []).filter((c) => c.outcome === "ok");
-  const failed = (llm ?? []).filter((c) => c.outcome !== "ok");
+  const failed = (llm ?? []).filter((c) => c.outcome !== "ok" && c.outcome !== "cached");
+  const cached = (llm ?? []).filter((c) => c.outcome === "cached").length;
   const short = (m: string) => (m.length > 28 ? `${m.slice(0, 26)}…` : m);
   const bits: string[] = [];
   if (ok.length) bits.push(`LLM ${ok.length}× · ${short(ok[0].model)} · ${(ok.reduce((a, c) => a + c.ms, 0) / 1000).toFixed(1)} s`);
+  if (cached) bits.push(`${cached} reused from cache`);
   if (failed.length) bits.push(`${failed.length} LLM call${failed.length > 1 ? "s" : ""} failed (${failed.map((c) => c.outcome).join(", ")})`);
   if (!llm?.length) bits.push("no LLM call");
   const rules = interpreter?.startsWith("rules");

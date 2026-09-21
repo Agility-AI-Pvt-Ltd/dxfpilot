@@ -1,0 +1,192 @@
+name: CI and EC2 deployment
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never run two deployments at once; never cancel one half-way.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('ci-{0}', github.ref) || 'cadpilot-deploy' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Directory on the EC2 host. Override with a repository variable DEPLOY_DIR.
+  DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/opt/dextool' }}
+
+jobs:
+  backend:
+    name: Backend tests (file store + PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: cadpilot
+          POSTGRES_PASSWORD: cadpilot
+          POSTGRES_DB: cadpilot
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U cadpilot -d cadpilot"
+          --health-interval 3s --health-timeout 3s --health-retries 30
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      TEST_DATABASE_URL: postgresql://cadpilot:cadpilot@localhost:5432/cadpilot
+      OPENAI_API_KEY: ""  # tests run on the rule-based agents; no model calls, no cost
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --locked --all-groups
+      - run: uv run pytest -q
+
+  frontend:
+    name: Frontend type-check and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run build
+
+  docker:
+    name: Compose config and image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose with the non-secret example settings
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+      - name: Build the API and web images
+        run: docker compose build api web
+
+  deploy:
+    name: Deploy to EC2
+    needs: [backend, frontend, docker]
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      EC2_HOST: ${{ secrets.EC2_HOST }}
+      EC2_USER: ${{ secrets.EC2_USER }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH (pinned host key)
+        env:
+          EC2_SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          EC2_SSH_KNOWN_HOSTS: ${{ secrets.EC2_SSH_KNOWN_HOSTS }}
+        run: |
+          for v in EC2_HOST EC2_USER EC2_SSH_PRIVATE_KEY EC2_SSH_KNOWN_HOSTS; do
+            test -n "${!v}" || { echo "::error::Missing secret $v"; exit 1; }
+          done
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$EC2_SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$EC2_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host ec2
+            HostName $EC2_HOST
+            User $EC2_USER
+            IdentityFile ~/.ssh/deploy_key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            ServerAliveInterval 30
+          EOF
+
+      - name: Preflight on the server
+        run: |
+          # shellcheck disable=SC2029  # values are expanded here on purpose and passed to the server
+          ssh ec2 "DEPLOY_DIR='$DEPLOY_DIR' bash -s" <<'EOF'
+          set -eu
+          docker compose version >/dev/null || { echo "::error::docker compose plugin missing on the host"; exit 1; }
+          mkdir -p "$DEPLOY_DIR"
+          cd "$DEPLOY_DIR"
+          if [ ! -f .env ]; then
+            echo "::error::$DEPLOY_DIR/.env is missing. Create it from .env.example (see docs/DEPLOYMENT.md)."; exit 1
+          fi
+          if ! grep -qE '^POSTGRES_PASSWORD=.{12,}$' .env || grep -qE '^POSTGRES_PASSWORD=(cadpilot|change-me)$' .env; then
+            echo "::error::Set a strong POSTGRES_PASSWORD (12+ characters) in $DEPLOY_DIR/.env"; exit 1
+          fi
+          echo "preflight ok"
+          EOF
+
+      - name: Back up the database
+        run: |
+          # shellcheck disable=SC2029  # values are expanded here on purpose and passed to the server
+          ssh ec2 "DEPLOY_DIR='$DEPLOY_DIR' SHA='${GITHUB_SHA::7}' bash -s" <<'EOF'
+          set -eu
+          cd "$DEPLOY_DIR"
+          mkdir -p backups
+          if docker compose ps --status running --services 2>/dev/null | grep -qx db; then
+            file="backups/$(date -u +%Y%m%dT%H%M%SZ)-before-$SHA.sql.gz"
+            docker compose exec -T db pg_dump -U cadpilot -d cadpilot | gzip > "$file"
+            echo "backup: $file ($(du -h "$file" | cut -f1))"
+            ls -1t backups/*.sql.gz | tail -n +11 | xargs -r rm --   # keep the 10 newest
+          else
+            echo "database not running yet (first deploy): nothing to back up"
+          fi
+          EOF
+
+      - name: Sync the application (never secrets, data or build output)
+        run: |
+          rsync -az --delete-delay -e "ssh" \
+            --include '.env.example' \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            --exclude '.claude/' \
+            --exclude '.env' \
+            --exclude '.env.*' \
+            --exclude 'backend/.env' \
+            --exclude '*.pem' \
+            --exclude '.venv/' \
+            --exclude 'node_modules/' \
+            --exclude '.next/' \
+            --exclude '__pycache__/' \
+            --exclude '.pytest_cache/' \
+            --exclude 'backend/storage/' \
+            --exclude 'backups/' \
+            ./ "ec2:$DEPLOY_DIR/"
+
+      - name: Build, start and verify
+        run: |
+          # shellcheck disable=SC2029  # values are expanded here on purpose and passed to the server
+          ssh ec2 "DEPLOY_DIR='$DEPLOY_DIR' bash -s" <<'EOF'
+          set -eu
+          cd "$DEPLOY_DIR"
+          docker compose config --quiet
+          docker compose up -d --build --remove-orphans
+          port=$(grep -E '^HTTP_PORT=' .env | cut -d= -f2 || true); port=${port:-80}
+          for i in $(seq 1 60); do
+            if curl -fsS "http://localhost:$port/api/health" >/tmp/health.json 2>/dev/null; then
+              echo "healthy after $((i * 3))s: $(cat /tmp/health.json)"
+              curl -fsS -o /dev/null "http://localhost:$port/" && echo "web ok"
+              docker compose ps
+              docker image prune -f >/dev/null
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::CadPilot did not become healthy"
+          docker compose ps
+          docker compose logs --tail 80 api web gateway
+          exit 1
+          EOF

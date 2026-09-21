@@ -1,0 +1,170 @@
+# Engineering module 7 — Curd (set / stirred curd, lassi, butter milk base)
+# Pasteurized milk → feed pump → curd milk heater (to incubation temperature) → incubation tanks
+# (inoculated with culture) → curd breaking pump → cooler → to packing. Culture: starter tank → dosing pump.
+
+id: curd
+name: Curd
+order: 7
+area: "7"
+area_name: Curd / fermented products
+# Excel section headings where this module's equipment is listed (rows there are preferred)
+sections: [fermented, curd]
+keywords: [curd, dahi, fermented, lassi, yoghurt, yogurt]
+summary: Milk → inoculation → incubation → cooling
+
+groups:
+  cu_in: {default_count: 1}
+  cu_feed: {lead_stage: cu_feed_pump, flow_stage: cu_feed_pump, default_count: 1}
+  cu_tanks: {lead_stage: cu_incubation_tank, default_count: 2}
+  cu_post: {lead_stage: cu_break_pump, flow_stage: cu_break_pump, default_count: 1}
+  cu_cult: {default_count: 1}
+
+stages:
+  - id: cu_milk_in
+    name: Pasteurized milk from storage
+    kind: terminal_in
+    group: cu_in
+    label: PASTEURIZED MILK FROM PMST
+    outlet_service: PM
+    function: Battery limit — standardized pasteurized milk for curd
+
+  - id: cu_feed_pump
+    name: Curd milk transfer pump
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: cu_feed
+    match: [curd milk transfer pump]
+    default_capacity: {value: 5, unit: KLPH}
+    attributes: {drive: VFD}
+    function: Feed the curd milk heater
+
+  - id: cu_heater
+    name: Curd milk heater
+    kind: equipment
+    equipment_type: heater_phe
+    group: cu_feed
+    match: [curd milk heater with hot water]
+    default_capacity: {value: 5, unit: KLPH}
+    attributes: {utility: hot water, duty: "→ 42–44 °C"}
+    function: Bring the milk to incubation temperature
+
+  - id: cu_incubation_tank
+    name: Curd incubation (setting) tank
+    kind: equipment
+    equipment_type: incubation_tank
+    group: cu_tanks
+    match: [curd setting tanks]
+    default_capacity: {value: 5, unit: KL}
+    attributes: {utility: "hot water, chilled water"}
+    outlet_service: CU
+    function: Incubate the inoculated milk until the set pH is reached
+
+  - id: cu_break_pump
+    name: Curd breaking / transfer pump
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: cu_post
+    match: [curd breaking pump]
+    default_capacity: {value: 5, unit: KLPH}
+    function: Break the coagulum gently and transfer it to cooling
+
+  - id: cu_cooler
+    name: Curd cooler
+    kind: equipment
+    equipment_type: plate_heat_exchanger
+    group: cu_post
+    match: [phe chiller, lassi]
+    default_capacity: {value: 5, unit: KLPH}
+    attributes: {utility: chilled water, duty: "→ 4–6 °C"}
+    function: Stop fermentation by cooling
+
+  - id: cu_out
+    name: To curd packing
+    kind: terminal_out
+    group: cu_post
+    label: TO CURD / LASSI PACKING
+    function: Battery limit — cooled curd / lassi base to the fermented filling machines
+
+  # ---- starter culture branch ----------------------------------------------------------------------
+  - id: cu_culture_in
+    name: Bulk starter
+    kind: terminal_in
+    group: cu_cult
+    branch: culture
+    label: BULK STARTER CULTURE
+    outlet_service: CUL
+    function: Battery limit — bulk starter from the culture room
+
+  - id: cu_culture_tank
+    name: Starter culture tank
+    kind: equipment
+    equipment_type: culture_tank
+    group: cu_cult
+    branch: culture
+    default_capacity: {value: 200, unit: L}
+    function: Hold the active starter culture at 20–22 °C
+
+  - id: cu_culture_pump
+    name: Culture dosing pump
+    kind: equipment
+    equipment_type: dosing_pump
+    group: cu_cult
+    branch: culture
+    default_capacity: {value: 0.1, unit: KLPH}
+    feeds: cu_incubation_tank
+    function: Inoculate each incubation tank with the starter (1–2 %)
+
+services:
+  PM: {name: Pasteurized milk, fluid: pasteurized milk}
+  CU: {name: Curd, fluid: curd}
+  CUL: {name: Starter culture, fluid: culture}
+
+symbols:
+  incubation_tank:
+    same_as: jacketed_tank
+    engineering_type: incubation_tank
+  culture_tank:
+    same_as: jacketed_tank
+    engineering_type: culture_tank
+
+tag_prefixes:
+  incubation_tank: T
+  culture_tank: T
+
+instrumentation_rules:
+  - id: IR-CU-INCUBATION-TEMP
+    applies_to: {equipment_type: incubation_tank}
+    attach: equipment
+    instruments:
+      - {function: TT, alarms: [TAH, TAL]}
+    loop: {controller: TIC, final_element: utility_valve, setpoint: "42 °C"}
+    rationale: Incubation temperature is held by the jacket valve; fermentation time depends on it.
+
+  - id: IR-CU-INCUBATION-PH
+    applies_to: {equipment_type: incubation_tank}
+    attach: equipment
+    instruments:
+      - {function: AT, alarms: [AAL]}
+    rationale: pH shows when the set point (≈ 4.6) is reached and cooling must start.
+
+  - id: IR-CU-INCUBATION-LEVEL
+    applies_to: {equipment_type: incubation_tank}
+    attach: equipment
+    instruments:
+      - {function: LT, alarms: [LAH]}
+    rationale: Batch volume for the culture ratio and overfill protection.
+
+  - id: IR-CU-CULTURE-TEMP
+    applies_to: {equipment_type: culture_tank}
+    attach: equipment
+    instruments:
+      - {function: TT, alarms: [TAH]}
+    rationale: Starter activity depends on its temperature.
+
+line_rules:
+  - id: LR-CU-DOSING-NRV
+    applies_to: {from_type: [dosing_pump], service: [CUL]}
+    type: check_valve
+    class: manual
+    position: 0.3
+    rationale: Non-return valve so milk cannot flow back into the culture line.

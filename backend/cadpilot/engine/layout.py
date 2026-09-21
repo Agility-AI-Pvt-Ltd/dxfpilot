@@ -14,6 +14,88 @@ from ..standards import Standards
 
 
 def layout(model: EngineeringModel, standards: Standards, intent: DesignIntent | None = None) -> Layout:
+    if any(st.module for st in model.process.stages):
+        return _layout_modules(model, standards, intent)
+    return _layout_single(model, standards, intent)
+
+
+def module_of_items(model: EngineeringModel) -> dict[str, str]:
+    """Every drawn item → its module (headers and tees take the module of what they connect)."""
+    stage_module = {st.id: st.module or "" for st in model.process.stages}
+    out = {e.tag: stage_module.get(e.stage, "") for e in model.equipment}
+    out |= {n.tag: stage_module.get(n.stage or "", "") for n in model.piping_nodes if n.stage}
+    changed = True
+    while changed:  # headers next to tees next to headers, however long the chain
+        changed = False
+        for ln in model.lines:
+            a, b = ln.from_.item, ln.to.item
+            if a in out and b not in out:
+                out[b], changed = out[a], True
+            elif b in out and a not in out:
+                out[a], changed = out[b], True
+    module_of_area = {st.area: st.module or "" for st in model.process.stages}
+    for n in model.piping_nodes:  # connected to nothing with a module: its area (one per module) says which
+        out.setdefault(n.tag, module_of_area.get(n.area, next((st.module or "" for st in model.process.stages), "")))
+    return out
+
+
+def _layout_modules(model: EngineeringModel, standards: Standards, intent: DesignIntent | None) -> Layout:
+    """One horizontal band per engineering module, stacked top to bottom in module order; a module's
+    side branches (dosing, condensate return, ...) get their own rows under its main chain."""
+    cfg = standards.layout
+    module_of = module_of_items(model)
+    order = list(dict.fromkeys(st.module or "" for st in model.process.stages))
+    branch_of = {st.id: st.branch for st in model.process.stages}
+    stage_of = {e.tag: e.stage for e in model.equipment} | {n.tag: n.stage for n in model.piping_nodes}
+    pos: dict[str, LayoutPoint] = {}
+    top_pad = cfg["instrument_offset_y"] + 60
+    y_cursor = float(cfg["margin"])
+    width = float(cfg["sheet_min_width"])
+    for mod in order:
+        items = {t for t, m in module_of.items() if m == mod}
+        stages = {st.id for st in model.process.stages if (st.module or "") == mod}
+        sub = model.model_copy(update={
+            "equipment": [e for e in model.equipment if e.tag in items],
+            "piping_nodes": [n for n in model.piping_nodes if n.tag in items],
+            "lines": [ln for ln in model.lines if ln.from_.item in items and ln.to.item in items],
+            "instruments": [i for i in model.instruments if i.attached_to.ref in items
+                            or any(ln.tag == i.attached_to.ref and ln.from_.item in items for ln in model.lines)],
+            "process": model.process.model_copy(update={
+                "stages": [st for st in model.process.stages if st.id in stages],
+                "groups": {g: n for g, n in model.process.groups.items()
+                           if any(st.group == g and st.id in stages for st in model.process.stages)},
+            }),
+        })
+        band = _layout_single(sub, standards, None).positions
+        if not band:
+            continue
+        # branches: below the main chain, one row per train
+        main_ys = [p.y for t, p in band.items() if not branch_of.get(stage_of.get(t) or "")]
+        row_y = (max(main_ys) if main_ys else 0) + cfg["row_height"]
+        for br in dict.fromkeys(branch_of[st] for st in stages if branch_of.get(st)):
+            br_items = [t for t in band if branch_of.get(stage_of.get(t) or "") == br]
+            trains = sorted({(model.get_equipment(t).train if model.get_equipment(t) else None) or
+                             next((n.train for n in model.piping_nodes if n.tag == t), 1) or 1 for t in br_items})
+            for t in br_items:
+                tr = (model.get_equipment(t).train if model.get_equipment(t) else None) or \
+                    next((n.train for n in model.piping_nodes if n.tag == t), 1) or 1
+                band[t] = LayoutPoint(x=band[t].x, y=row_y + trains.index(tr) * cfg["row_height"])
+            row_y += len(trains) * cfg["row_height"]
+        top = min(p.y for p in band.values())
+        shift = y_cursor + top_pad - top
+        for t, p in band.items():
+            pos[t] = LayoutPoint(x=p.x, y=p.y + shift)
+        y_cursor = max(p.y for p in band.values()) + shift + cfg["row_height"] * 0.75
+        width = max(width, max(p.x for p in band.values()) + 2 * cfg["margin"] + 60)
+
+    if intent:
+        for tag, (dx, dy) in intent.layout_offsets.items():
+            if tag in pos:
+                pos[tag] = LayoutPoint(x=pos[tag].x + dx, y=pos[tag].y + dy)
+    return Layout(positions=pos, width=width, height=y_cursor + cfg["margin"] + cfg["title_block_height"])
+
+
+def _layout_single(model: EngineeringModel, standards: Standards, intent: DesignIntent | None = None) -> Layout:
     cfg = standards.layout
     kinds = {e.tag: e.type for e in model.equipment} | {n.tag: n.kind for n in model.piping_nodes}
     trains = {e.tag: e.train for e in model.equipment} | {n.tag: n.train for n in model.piping_nodes}

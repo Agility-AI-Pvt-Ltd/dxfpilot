@@ -1,0 +1,115 @@
+# Engineering module 6 — Chilled water
+# Chilled-water return → chilled-water tank (ice bank) → circulation pumps → water chiller
+# (refrigeration plant) → one supply per chilled-water user found in the other modules.
+
+id: chilled_water
+name: Chilled water
+order: 6
+area: "6"
+area_name: Chilled water generation & distribution
+# Excel section headings where this module's equipment is listed (rows there are preferred)
+sections: [refrigeration, chilled water, jacket cooling]
+keywords: [chilled water, refrigeration, ice bank, chiller plant]
+summary: Chiller → chilled-water loop → process users
+utility: chilled water
+
+groups:
+  chw_ret: {default_count: 1}
+  chw_pumps: {lead_stage: chw_pump, flow_stage: chw_pump, default_count: 2}
+  chw_plant: {default_count: 1}
+  chw_users: {default_count: 1}
+
+stages:
+  - id: chw_return
+    name: Chilled water return
+    kind: terminal_in
+    group: chw_ret
+    label: CHILLED WATER RETURN FROM USERS
+    outlet_service: CHWR
+    function: Battery limit — chilled water returning from the users
+
+  - id: chw_tank
+    name: Chilled water tank (ice bank)
+    kind: equipment
+    equipment_type: chw_tank
+    group: chw_ret
+    match: [chilled water balance tank]
+    default_capacity: {value: 20, unit: KL}
+    function: Thermal storage and buffer of the chilled-water loop
+
+  - id: chw_pump
+    name: Chilled water circulation pump
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: chw_pumps
+    match: [chilled water circulation pump]
+    default_capacity: {value: 60, unit: KLPH}
+    function: Circulate chilled water to the users (1 working + 1 standby)
+
+  - id: chw_chiller
+    name: Water chiller (refrigeration plant)
+    kind: equipment
+    equipment_type: water_chiller
+    group: chw_plant
+    match: [refrigeration plant]
+    default_capacity: {value: 120, unit: KLPH}
+    attributes: {duty: "→ 1–2 °C"}
+    outlet_service: CHWS
+    function: Chill the circulating water (ammonia / Freon refrigeration)
+
+  - id: chw_users
+    name: Chilled water to users
+    kind: terminal_out
+    group: chw_users
+    utility_users: chilled water
+    label: CHILLED WATER TO
+    function: Battery limit — chilled-water supply to a consumer
+
+services:
+  CHWR: {name: Chilled water return, fluid: chilled water}
+  CHWS: {name: Chilled water supply, fluid: chilled water}
+
+symbols:
+  chw_tank:
+    same_as: vessel_tank
+    engineering_type: ice_bank_tank
+  water_chiller:
+    engineering_type: water_chiller
+    size: [84, 60]
+    ports:
+      inlet: {x: -42, y: 14, side: left}
+      outlet: {x: 42, y: -14, side: right}
+    graphics: |
+      <rect class="sym" x="-42" y="-30" width="84" height="60"/>
+      <circle class="sym-thin" cx="-14" r="13"/>
+      <path class="sym-thin" d="M-22,-6 L-6,-6 L-14,8 Z"/>
+      <path class="sym-thin" d="M8,-18 L32,-18 M8,-8 L32,-8 M8,2 L32,2 M8,12 L32,12"/>
+
+tag_prefixes:
+  chw_tank: T
+  water_chiller: CH
+
+instrumentation_rules:
+  - id: IR-CHW-SUPPLY-TEMP
+    applies_to: {equipment_type: water_chiller}
+    attach: outlet_line
+    instruments:
+      - {function: TT, alarms: [TAH, TAL]}
+    loop: {controller: TIC, final_element: utility_valve, setpoint: "1.5 °C"}
+    rationale: Supply temperature is held by the refrigeration capacity; low temperature protects against freezing.
+
+  - id: IR-CHW-TANK
+    applies_to: {equipment_type: chw_tank}
+    attach: equipment
+    instruments:
+      - {function: LT, alarms: [LAL]}
+      - {function: TT}
+    rationale: Low level protects the pumps; tank temperature shows the stored cooling.
+
+line_rules:
+  - id: LR-CHILLEDWATER-USER-ISOLATION
+    applies_to: {to_type: [terminal_out], service: [CHWS]}
+    type: butterfly_valve
+    class: manual
+    position: 0.6
+    rationale: Isolation valve on every chilled-water take-off so a user can be serviced without draining the loop.

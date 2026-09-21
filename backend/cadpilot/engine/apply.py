@@ -30,6 +30,7 @@ from ..standards import Standards
 CAPACITY_UNITS = {
     "klph": "KLPH", "kl/h": "KLPH", "lph": "LPH", "l/h": "LPH", "m3/h": "m3/h", "m³/h": "m3/h",
     "kl": "KL", "l": "L", "ltr": "L", "litre": "L", "liter": "L", "kg/h": "kg/h", "kg/hr": "kg/h",
+    "tph": "t/h", "t/h": "t/h", "kw": "kW", "tr": "TR",
 }
 
 

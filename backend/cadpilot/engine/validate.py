@@ -9,7 +9,9 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 
 from ..agents.instrumentation import attachment_line, rule_applies
-from ..engine.sizing import flow_m3h, velocity
+from ..engine import line_rules
+from ..engine.layout import module_of_items
+from ..engine.sizing import flow_m3h
 from ..ingest.excel import SourceData
 from ..model.engineering import EngineeringModel
 from ..model.proposals import ValidationIssue, ValidationReport
@@ -128,11 +130,13 @@ def _topology(m: EngineeringModel, s: Standards, c: _Collector) -> None:
         c.check(L)
         c.add(L, "error", "NO_PROCESS_PATH", f"Outlet battery limit {tag} is not fed by any process path", [tag], "topology_agent")
 
-    # Disconnected process islands
+    # Disconnected process islands — per engineering module (modules meet at battery limits)
     all_nodes = m.node_tags()
-    if all_nodes:
+    module_of = module_of_items(m)
+    for mod in dict.fromkeys(module_of.get(t, "") for t in sorted(all_nodes)):
+        part = {t for t in all_nodes if module_of.get(t, "") == mod}
         c.check(L)
-        start = next(iter(sorted(all_nodes)))
+        start = next(iter(sorted(part)))
         seen, stack = set(), [start]
         while stack:
             cur = stack.pop()
@@ -140,24 +144,32 @@ def _topology(m: EngineeringModel, s: Standards, c: _Collector) -> None:
                 continue
             seen.add(cur)
             stack += list(und[cur])
-        rest = all_nodes - seen
+        rest = part - seen
         if rest:
-            c.add(L, "error", "ISLAND", f"{len(rest)} item(s) form a disconnected island", sorted(rest), "topology_agent")
+            where = f" in module {mod}" if mod else ""
+            c.add(L, "error", "ISLAND", f"{len(rest)} item(s) form a disconnected island{where}", sorted(rest), "topology_agent")
 
     # Directed cycles in the process path (bypasses excluded)
     c.check(L)
     state: dict[str, int] = {}
+    path: list[str] = []
+    cycle: list[str] = []
 
     def dfs(u: str) -> bool:
         state[u] = 1
+        path.append(u)
         for v in out_adj[u]:
-            if state.get(v) == 1 or (state.get(v) is None and dfs(v)):
+            if state.get(v) == 1:
+                cycle.extend(path[path.index(v):] + [v])
+                return True
+            if state.get(v) is None and dfs(v):
                 return True
         state[u] = 2
+        path.pop()
         return False
 
     if any(state.get(t) is None and dfs(t) for t in sorted(all_nodes)):
-        c.add(L, "error", "CYCLE", "The process path contains a loop", [], "topology_agent")
+        c.add(L, "error", "CYCLE", f"The process path contains a loop: {' → '.join(cycle)}", cycle[:-1], "topology_agent")
 
 
 def _engineering(m: EngineeringModel, s: Standards, c: _Collector) -> None:
@@ -221,17 +233,14 @@ def _engineering(m: EngineeringModel, s: Standards, c: _Collector) -> None:
 
     if cfg.get("enforce_line_rules", True):
         kinds = {e.tag: e.type for e in m.equipment} | {n.tag: n.kind for n in m.piping_nodes}
-        need = {
-            "pump_suction": lambda ln: kinds.get(ln.to.item) == "centrifugal_pump",
-            "pump_discharge": lambda ln: kinds.get(ln.from_.item) == "centrifugal_pump",
-            "header_branch": lambda ln: "header" in (kinds.get(ln.from_.item), kinds.get(ln.to.item)),
-        }
+        area = {e.tag: e.area for e in m.equipment} | {n.tag: n.area for n in m.piping_nodes}
+        mod_of_area = line_rules.module_of_area(m.process)
         for vr in s.line_rules["valves"]:
-            pred = need.get(vr["applies_to"])
-            if not pred:
-                continue
+            if vr["applies_to"] == "bypass":
+                continue  # a reviewer's choice, not a requirement
             for ln in m.lines:
-                if ln.kind == "bypass" or not pred(ln):
+                if ln.kind == "bypass" or not line_rules.in_scope(vr, area.get(ln.from_.item) or area.get(ln.to.item), mod_of_area) \
+                        or not line_rules.applies(vr["applies_to"], kinds.get(ln.from_.item), kinds.get(ln.to.item), ln.kind, ln.service):
                     continue
                 c.check(L)
                 if any(comp.type == vr["type"] and comp.provenance.rule == vr["id"] for comp in ln.inline):
@@ -257,11 +266,12 @@ def _data(m: EngineeringModel, s: Standards, src: SourceData | None, c: _Collect
 
     if isinstance(intake, (int, float)) and intake:
         intake_m3 = intake / 1000
-        for stage, limit_key, label in (
-            ("unloading_pump", "reception_max_hours_per_day", "Reception"),
-            ("pasteurizer", "processing_max_hours_per_day", "Pasteurization"),
+        for stages, limit_key, label in (
+            (("unloading_pump",), "reception_max_hours_per_day", "Reception"),
+            (("pasteurizer", "pz_pasteurizer"), "processing_max_hours_per_day", "Pasteurization"),
         ):
             c.check(L)
+            stage = next((x for x in stages if by_stage.get(x)), stages[0])
             f = total_flow(stage)
             if f and limit_key in cfg:
                 hours = intake_m3 / f
@@ -283,25 +293,32 @@ def _data(m: EngineeringModel, s: Standards, src: SourceData | None, c: _Collect
         if cap is None:
             continue
         for ln in m.lines_into(e.tag):
-            if ln.design_flow and ln.kind == "process" and cap + 1e-6 < ln.design_flow.value:
+            line_flow = flow_m3h(ln.design_flow)  # same basis as the capacity (kg/h and t/h included)
+            if line_flow is not None and ln.kind == "process" and cap + 1e-6 < line_flow:
                 c.add(L, "warning", "UNDERSIZED", f"{e.tag} capacity {e.capacity} is below the design flow {ln.design_flow} of {ln.tag}", [e.tag, ln.tag], "equipment_agent")
 
     vmax = cfg.get("max_line_velocity_m_s")
     for ln in m.lines:
         c.check(L)
         if ln.size_dn is None:
-            if ln.kind == "process":
+            if ln.kind == "process" and line_rules.sized(s.line_rules, ln.service):
                 c.add(L, "warning", "UNSIZED_LINE", f"{ln.tag} has no size", [ln.tag], "topology_agent")
             continue
-        if ln.design_flow and vmax:
-            v = velocity(ln.design_flow.value, ln.size_dn)
-            if v > vmax:
+        if ln.design_flow and vmax and (f := flow_m3h(ln.design_flow)) is not None:
+            v, v_allowed = line_rules.line_velocity(s.line_rules, ln.service, f, ln.size_dn)
+            if v > max(vmax, v_allowed):
                 c.add(L, "warning", "HIGH_VELOCITY", f"{ln.tag}: {v:.2f} m/s at DN{ln.size_dn}", [ln.tag], "topology_agent")
 
     if src is not None:
         rows = {r.ref: r for r in src.equipment_rows}
         for e in m.equipment:
             row = rows.get(e.provenance.source or "")
+            if row is not None and row.flags:
+                c.check(L)
+                c.add(L, "warning", "SOURCE_ROW_UNREADABLE", f"{e.tag} comes from {row.ref.split(':')[-1]} where {'; '.join(row.flags)} — check the design data or correct it in chat", [e.tag], "equipment_agent")
+            elif row is not None and row.read_by == "llm":
+                c.check(L)
+                c.add(L, "info", "SOURCE_READ_BY_AI", f"{e.tag}: a value in {row.ref.split(':')[-1]} was read by the AI ({row.note})", [e.tag], None)
             if row and row.capacity and e.capacity and (row.capacity.value, row.capacity.unit) != (e.capacity.value, e.capacity.unit):
                 c.check(L)
                 c.add(L, "info", "DIFFERS_FROM_SOURCE", f"{e.tag} capacity {e.capacity} differs from design data ({row.capacity})", [e.tag], None)

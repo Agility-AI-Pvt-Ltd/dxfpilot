@@ -40,9 +40,14 @@ class DesignIntent(BaseModel):
     suppressed: dict[str, str] = Field(default_factory=dict)  # tag -> reviewer reason (rule waiver)
     layout_offsets: dict[str, tuple[float, float]] = Field(default_factory=dict)
     constraints: list[str] = Field(default_factory=list)
+    # Which engine plans connections/valves/instruments: the rule agents (default), or the
+    # experimental LLM planner whose IR is compiled and validated deterministically.
+    engine: Literal["rules", "llm_planner"] = "rules"
     # Validated LLM answers keyed by a hash of their inputs: regenerations reuse them, so a correction
     # never silently changes an unrelated LLM decision (and does not pay for the same call twice).
     llm_memory: dict[str, dict] = Field(default_factory=dict)
+    # what the scope agent found in the workbooks (plant sections + evidence rows), for the reviewer
+    scope_detection: dict | None = None
 
 
 # ---- change operations -------------------------------------------------------------------

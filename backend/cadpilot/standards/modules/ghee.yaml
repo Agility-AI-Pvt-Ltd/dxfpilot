@@ -1,0 +1,164 @@
+# Engineering module 8 — Ghee
+# Butter / cream → butter pump → continuous butter melter → ghee boilers (steam-jacketed) →
+# ghee pump → clarifier → settling tanks → to ghee packing.
+
+id: ghee
+name: Ghee
+order: 8
+area: "8"
+area_name: Ghee making
+# Excel section headings where this module's equipment is listed (rows there are preferred)
+sections: [ghee]
+keywords: [ghee, butter oil, clarified butter]
+summary: Cream/butter → heating → clarification → filtration
+
+groups:
+  gh_in: {lead_stage: gh_butter_pump, flow_stage: gh_butter_pump, default_count: 1}
+  gh_kettles: {lead_stage: gh_kettle, default_count: 2}
+  gh_clar: {lead_stage: gh_clarifier, flow_stage: gh_transfer_pump, default_count: 1}
+  gh_settle: {lead_stage: gh_settling_tank, default_count: 2}
+
+stages:
+  - id: gh_butter_in
+    name: Butter / cream from the butter section
+    kind: terminal_in
+    group: gh_in
+    label: WHITE BUTTER / CREAM FROM BUTTER SECTION
+    outlet_service: BT
+    function: Battery limit — butter or cream for ghee
+
+  - id: gh_butter_pump
+    name: Butter pump (positive displacement)
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: gh_in
+    match: [butter pump positive displacement]
+    default_capacity: {value: 3, unit: KLPH}
+    attributes: {pump_type: positive displacement}
+    function: Feed butter to the melter
+
+  - id: gh_melter
+    name: Continuous butter melter
+    kind: equipment
+    equipment_type: butter_melter
+    group: gh_in
+    match: [continuous butter melter]
+    default_capacity: {value: 3, unit: KLPH}
+    attributes: {utility: hot water}
+    outlet_service: MB
+    function: Melt butter with hot water to ~50 °C
+
+  - id: gh_melt_pump
+    name: Molten butter transfer pump
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: gh_in
+    match: [molten butter transfer pump]
+    default_capacity: {value: 3, unit: KLPH}
+    function: Charge the ghee boilers
+
+  - id: gh_kettle
+    name: Ghee boiler (steam-jacketed kettle)
+    kind: equipment
+    equipment_type: ghee_kettle
+    group: gh_kettles
+    match: [ghee boiler]
+    default_capacity: {value: 1, unit: KL}
+    attributes: {utility: steam}
+    outlet_service: GH
+    function: Boil off the moisture and develop flavour at 110–120 °C
+
+  - id: gh_transfer_pump
+    name: Ghee transfer pump
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: gh_clar
+    match: [ghee transfer pump]
+    default_capacity: {value: 5, unit: KLPH}
+    function: Transfer ghee through the clarifier
+
+  - id: gh_clarifier
+    name: Ghee clarifier
+    kind: equipment
+    equipment_type: centrifugal_separator
+    group: gh_clar
+    match: [ghee clarifier]
+    default_capacity: {value: 2, unit: KLPH}
+    function: Remove ghee residue (burnt milk solids)
+
+  - id: gh_settling_tank
+    name: Ghee settling tank
+    kind: equipment
+    equipment_type: settling_tank
+    group: gh_settle
+    match: [ghee settling tanks]
+    default_capacity: {value: 2, unit: KL}
+    function: Settle fine residue before packing
+
+  - id: gh_out
+    name: To ghee packing
+    kind: terminal_out
+    group: gh_settle
+    label: TO GHEE PACKING
+    function: Battery limit — clarified ghee to the pouch / tin fillers
+
+services:
+  BT: {name: Butter, fluid: butter}
+  MB: {name: Molten butter, fluid: molten butter}
+  GH: {name: Ghee, fluid: ghee}
+
+symbols:
+  butter_melter:
+    engineering_type: butter_melter
+    size: [72, 64]
+    ports:
+      inlet: {x: -36, y: -22, side: left}
+      outlet: {x: 22, y: 26, side: right}
+    graphics: |
+      <path class="sym" d="M-36,-32 L36,-32 L20,18 L-20,18 Z"/>
+      <rect class="sym" x="-12" y="18" width="24" height="12"/>
+      <path class="sym-thin" d="M-22,-16 L-14,-6 L-6,-16 L2,-6 L10,-16 L18,-6"/>
+  ghee_kettle:
+    same_as: jacketed_tank
+    engineering_type: ghee_boiler
+  settling_tank:
+    same_as: vessel_tank
+    engineering_type: settling_tank
+
+tag_prefixes:
+  butter_melter: M
+  ghee_kettle: K
+  settling_tank: T
+
+instrumentation_rules:
+  - id: IR-GH-MELTER-TEMP
+    applies_to: {equipment_type: butter_melter}
+    attach: outlet_line
+    instruments:
+      - {function: TT, alarms: [TAH]}
+    loop: {controller: TIC, final_element: utility_valve, setpoint: "50 °C"}
+    rationale: Molten butter temperature is held by the hot-water valve.
+
+  - id: IR-GH-KETTLE-TEMP
+    applies_to: {equipment_type: ghee_kettle}
+    attach: equipment
+    instruments:
+      - {function: TT, alarms: [TAH]}
+    loop: {controller: TIC, final_element: utility_valve, setpoint: "115 °C"}
+    rationale: The end-point temperature decides moisture and flavour; the steam valve holds it.
+
+  - id: IR-GH-KETTLE-PRESSURE
+    applies_to: {equipment_type: ghee_kettle}
+    attach: equipment
+    instruments:
+      - {function: PI}
+      - {function: PSV}
+    rationale: Jacket steam pressure is shown and relieved (pressure part).
+
+  - id: IR-GH-SETTLING
+    applies_to: {equipment_type: settling_tank}
+    attach: equipment
+    instruments:
+      - {function: LT, alarms: [LAH]}
+      - {function: TT}
+    rationale: Inventory for packing and the settling temperature (ghee must stay liquid).

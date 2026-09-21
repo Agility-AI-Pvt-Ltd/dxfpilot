@@ -1,0 +1,66 @@
+# How workbook tables are recognised. Headers are matched after normalisation (lower case, punctuation
+# removed); a synonym also matches when all its words appear in the header, and small typos are
+# tolerated. `avoid` words disqualify a header for that field (e.g. "Unit Price" is not a unit).
+# Anything these lists cannot resolve — other wording, other languages, tables without headers —
+# goes to the LLM table mapper, whose answer is then checked against the cell values.
+
+equipment:
+  required: [description, capacity, quantity]  # capacity separates equipment lists from civil BOQs
+  fields:
+    description:
+      synonyms: [description, item description, equipment, equipment description, particulars, item,
+                 name of equipment, equipment name, details, specification, विवरण, उपकरण, उपकरण का विवरण]
+      avoid: [code, price, rate, amount, cost]
+    capacity:
+      synonyms: [capacity, cap, rating, size, duty, flow, throughput, volume, क्षमता, आकार]
+      avoid: [price, rate, amount, cost]
+    quantity:
+      synonyms: [qty, quantity, nos, no of units, number of units, units required, count, मात्रा, संख्या]
+      avoid: [price, rate, amount, cost, sl, sr, serial, total]
+    unit:
+      synonyms: [uom, unit, units, unit of measure, इकाई]
+      avoid: [price, rate, amount, cost]
+
+mass_balance:
+  fields:
+    name:
+      synonyms: [milk, product, milk product, stream, description, item, दूध, उत्पाद]
+      avoid: [kg, fat, snf]
+    litres:
+      synonyms: [in l, litres, liters, litre, liter, ltr, volume, volume l, qty l, quantity l, लीटर]
+      avoid: [kg, fat, snf]
+    kg:
+      synonyms: [in kg, kg, mass, weight, mass kg, किलो, किलोग्राम]
+      avoid: [fat, snf]
+    fat:
+      synonyms: [fat, fat percent, milk fat, वसा]
+      avoid: [kg]
+    snf:
+      synonyms: [snf, solids not fat, एसएनएफ]
+      avoid: [kg]
+
+design_criteria:
+  # Words that mark a design-criteria / basis-of-design sheet (searched in the first rows)
+  markers: [design criteria, design basis, basis of design, design data, डिज़ाइन मानदंड, डिजाइन मानदंड]
+
+units:
+  # capacity unit spellings → canonical unit
+  KLPH: [klph, kl/h, kl/hr, kl per hour, kilolitre per hour, kiloliter per hour, किलोलीटर प्रति घंटा]
+  LPH: [lph, l/h, l/hr, ltr/h, ltr/hr, lit/hr, litre per hour, liter per hour, लीटर प्रति घंटा]
+  m3/h: [m3/h, m3/hr, m³/h, m³/hr, cum/h, cum/hr, cubic metre per hour]
+  kg/h: [kg/h, kg/hr, kgph, kg per hour, kg./hr, kg./hr., किलो प्रति घंटा]
+  KL: [kl, kilolitre, kiloliter, किलोलीटर]
+  L: [l, ltr, ltrs, lts, litre, litres, liter, liters, lit, लीटर]
+  kg: [kg, kgs, kg., किलो]
+  t: [mt, t, tonne, ton, टन]
+  t/h: [tph, t/h, t/hr, tonne per hour, ton per hour]
+  t/day: [mtpd, tpd, t/day, tonne per day]
+  CFM: [cfm]
+  m3/min: [m3/min, cum/min, m³/min]
+  kW: [kw]
+  kVA: [kva]
+  HP: [hp]
+  TR: [tr, ton of refrigeration]
+  CPH: [cph]
+  PPH: [pph]
+  per min: [per min, /min, tins/min, tin/min, pouches/min, bottles/min]

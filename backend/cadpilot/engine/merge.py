@@ -64,7 +64,30 @@ def reconcile(
         if ov.name:
             eq.name = ov.name
         eq.attributes.update(ov.attributes)
+
+    # Utility modules: one supply outlet per consumer of that utility in the other modules
+    module_of = {st.id: st.module for st in proc.stages}
+    for st in proc.stages:
+        if not st.utility_users:
+            continue
+        users = consumers(st.utility_users, st.module, kept, module_of)
+        n = max(len(users), 1)
+        if st.group not in intent.group_counts and proc.groups.get(st.group) != n:
+            proc.groups[st.group] = n
+            decisions.append(Decision(
+                agent="primary_agent", summary=f"{st.name}: {len(users)} {st.utility_users} consumer(s)",
+                detail=(", ".join(f"{e.tag} {e.name}" for e in users) + ". Take-offs are sized on an equal share of the header "
+                        "flow until each consumer's demand is set") if users else f"No {st.utility_users} consumer in the selected modules — one general outlet",
+            ))
     return proc, kept, decisions
+
+
+def consumers(utility: str, module: str | None, equipment: list[Equipment], module_of: dict[str, str | None]) -> list[Equipment]:
+    """Equipment in OTHER modules whose `utility` attribute names this utility (sorted by tag)."""
+    def uses(e: Equipment) -> bool:
+        names = [u.strip().lower() for u in str(e.attributes.get("utility", "")).split(",")]
+        return utility.lower() in names
+    return sorted((e for e in equipment if uses(e) and module_of.get(e.stage) != module), key=lambda e: e.tag)
 
 
 def assemble(

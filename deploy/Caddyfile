@@ -1,0 +1,25 @@
+# SITE_ADDRESS=":80" serves plain HTTP on any host name (default).
+# SITE_ADDRESS="pid.example.com" makes Caddy obtain and renew a Let's Encrypt certificate
+# (needs DNS pointing at the instance and ports 80 + 443 open).
+{$SITE_ADDRESS::80} {
+	encode zstd gzip
+
+	# API, including the Server-Sent Events progress stream (Caddy flushes text/event-stream immediately)
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	request_body {
+		max_size 25MB
+	}
+}

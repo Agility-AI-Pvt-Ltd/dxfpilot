@@ -3,6 +3,8 @@ configured instrumentation rules, plus instruments the reviewer asked for."""
 
 from __future__ import annotations
 
+from langsmith import traceable
+
 from ..model.engineering import (
     ControlLoop,
     Equipment,
@@ -15,13 +17,22 @@ from ..model.engineering import (
 )
 from ..model.proposals import InstrumentationProposal
 from .context import AgentContext
+from .llm import mark_source
 
 AGENT = "instrumentation_agent"
 
 
 def rule_applies(rule: dict, eq: Equipment) -> bool:
+    """applies_to: {equipment_type: x | [x, y]} and/or {stage: s | [s, t]} (either matches)."""
     a = rule["applies_to"]
-    return eq.type == a.get("equipment_type") or eq.stage == a.get("stage")
+
+    def hit(value: str, want) -> bool:
+        return want is not None and value in (want if isinstance(want, list) else [want])
+
+    return hit(eq.type, a.get("equipment_type")) or hit(eq.stage, a.get("stage"))
+
+
+LINE_VALVE_FINAL = {"inlet_control_valve": "inlet_line", "outlet_control_valve": "outlet_line"}
 
 
 def attachment_line(rule_attach: str, eq: Equipment, lines: list[Line]) -> Line | None:
@@ -52,6 +63,7 @@ def _walk_to_pump(start: str, lines: list[Line], kinds: dict[str, str], upstream
     return None
 
 
+@traceable(name="instrumentation_agent", run_type="chain", process_inputs=lambda d: d["ctx"].trace_summary())
 def run(
     ctx: AgentContext,
     equipment: list[Equipment],
@@ -124,6 +136,15 @@ def run(
                         inline.setdefault(out_line.tag, []).append(
                             InlineComponent(tag=final_tag, type=symbols["diversion_valve"], position=0.35, provenance=prov)
                         )
+                elif final_kind in LINE_VALVE_FINAL:  # e.g. tank level → inlet valve, steam pressure → PRV outlet
+                    ctl_line = attachment_line(LINE_VALVE_FINAL[final_kind], eq, lines)
+                    if ctl_line:
+                        final_tag = f"{loop_cfg['controller'][0]}CV-{loop_no}"
+                        inline.setdefault(ctl_line.tag, []).append(
+                            InlineComponent(tag=final_tag, type="control_valve", position=0.45, provenance=prov)
+                        )
+                elif final_kind == "self_vfd" and eq.type == "centrifugal_pump":  # the pump's own speed
+                    final_tag, kind = eq.tag, "vfd"
                 elif final_kind in ("upstream_pump_vfd", "downstream_pump_vfd"):
                     final_tag = _walk_to_pump(eq.tag, lines, kinds, upstream=final_kind.startswith("up"))
                     kind = "vfd"
@@ -176,4 +197,5 @@ def run(
             )
         )
 
+    mark_source("rules", rules="instrumentation.yaml")
     return InstrumentationProposal(instruments=instruments, loops=loops, inline=inline, warnings=warnings)

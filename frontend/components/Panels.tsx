@@ -183,6 +183,48 @@ export function DecisionsPanel({ rev, projectId }: { rev: Revision; projectId: s
     <div className="pane">
       <h2>Agent decisions</h2>
       <p className="sub">What the primary agent decided, and what the workers assumed where the data was silent.</p>
+      <p className="section-title">Engine</p>
+      <p style={{ margin: "0 0 12px" }}>
+        {md.engine === "llm_planner" ? "LLM planner (experimental) — plan validated deterministically" : "Rules engine"}
+      </p>
+      {md.planner && (
+        <>
+          <p className="section-title">LLM planner attempts ({md.planner.attempts} of max {md.planner.max_attempts})</p>
+          {md.planner.stop_reason && (
+            <p style={{ margin: "0 0 8px", fontSize: 13 }}>
+              Stopped: {md.planner.stop_reason}
+              {md.planner.best_attempt ? ` — this drawing is attempt ${md.planner.best_attempt}, the one with the fewest errors.` : ""}
+            </p>
+          )}
+          <table className="grid" style={{ marginBottom: 20 }}>
+            <thead><tr><th>Attempt</th><th>Plan</th><th>Validation</th></tr></thead>
+            <tbody>
+              {md.planner.history.map((h) => (
+                <tr key={h.attempt} style={h.kept === false ? { opacity: 0.6 } : undefined}>
+                  <td>
+                    {h.attempt}
+                    {h.attempt === md.planner!.best_attempt && <div><span className="badge ok">used</span></div>}
+                    {h.kept === false && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>discarded (worse)</div>}
+                  </td>
+                  <td style={{ fontSize: 12.5 }}>
+                    {h.plan}
+                    {h.changes && h.attempt > 1 && <div style={{ color: "var(--muted)" }}>patch: {h.changes}</div>}
+                    {h.patch_problems?.map((x, k) => <div key={k} className="sev warning" style={{ textTransform: "none" }}>{x}</div>)}
+                  </td>
+                  <td style={{ fontSize: 12.5 }}>
+                    {h.errors.length === 0 ? <span className="sev info">passed</span> : (
+                      <details>
+                        <summary className="sev error" style={{ cursor: "pointer" }}>{h.errors.length} error(s)</summary>
+                        {h.errors.map((e, k) => <div key={k}>{e}</div>)}
+                      </details>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
       <p className="section-title">LLM calls (audit log, newest first)</p>
       <LLMCallsTable projectId={projectId} refreshKey={rev.revision} />
       <p className="section-title">Run log</p>
