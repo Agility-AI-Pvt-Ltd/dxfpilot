@@ -12,6 +12,10 @@ equipment:
     plate_heat_exchanger: E
     pasteurizer: E
     centrifugal_separator: S
+    vessel_tank: T
+    jacketed_tank: T
+    dosing_pump: P
+    heater_phe: E
 
 piping_nodes:
   format: "{prefix}-{area}{seq:02d}"

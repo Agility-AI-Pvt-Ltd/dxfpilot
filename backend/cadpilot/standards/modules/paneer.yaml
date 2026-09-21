@@ -1,0 +1,315 @@
+# Engineering module 11 — Paneer
+# Standardized milk → paneer milk silo → transfer pump → paneer milk pasteurizer (heat to ~90 °C) →
+# paneer vats (coagulation with citric acid) → hoops → pneumatic presses → block cutter →
+# chilled-water cooling tank → vacuum packing. Whey from the hoops/presses goes to whey handling.
+# From the vat outlet on, the product is curd mass and blocks moved by hoops, trolleys and conveyors:
+# those links are drawn as product transfers (service CM / PNB), not as sized pipes.
+
+id: paneer
+name: Paneer
+order: 11
+area: "11"
+area_name: Paneer making
+# Excel section headings where this module's equipment is listed (rows there are preferred)
+sections: [paneer]
+keywords: [paneer, cottage cheese, chhena]
+# mass-balance products this section makes (the coverage check matches them)
+products: [paneer]
+summary: Milk → heating → coagulation → pressing → cooling → packing
+
+groups:
+  pn_in: {default_count: 1}
+  pn_milk: {lead_stage: pn_silo, default_count: 1}
+  pn_heat: {lead_stage: pn_pasteurizer, flow_stage: pn_feed_pump, default_count: 1}
+  pn_vats: {lead_stage: pn_vat, default_count: 3}
+  pn_press: {lead_stage: pn_press, default_count: 2}
+  pn_block: {default_count: 1}
+  pn_acid: {default_count: 1}
+  pn_whey: {default_count: 1}
+
+
+sizing:
+  - {stage: pn_silo, basis: products, products: [paneer], factor: 5, storage_days: 1}   # ~5 L milk per kg paneer
+  - {stage: pn_pasteurizer, basis: products, products: [paneer], factor: 5, hours: 8}
+  - {stage: pn_vat, basis: products, products: [paneer], factor: 5, hours: 8, batch_cycle_h: 2}
+
+stages:
+  - id: pn_milk_in
+    name: Standardized milk for paneer
+    kind: terminal_in
+    group: pn_in
+    label: STANDARDIZED MILK FROM PROCESSING
+    outlet_service: SM
+    function: Battery limit — standardized milk for paneer
+
+  - id: pn_silo
+    name: Paneer milk silo
+    kind: equipment
+    equipment_type: silo
+    group: pn_milk
+    match: [paneer silo]
+    default_capacity: {value: 20, unit: KL}
+    function: Buffer the day's paneer milk
+
+  - id: pn_feed_pump
+    name: Paneer milk transfer pump
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: pn_heat
+    match: [transfer pump silo]
+    default_capacity: {value: 5, unit: KLPH}
+    attributes: {drive: VFD}
+    function: Feed the paneer milk pasteurizer
+
+  - id: pn_pasteurizer
+    name: Paneer milk pasteurizer
+    kind: equipment
+    equipment_type: pasteurizer
+    group: pn_heat
+    match: [paneer milk pasteurizer]
+    default_capacity: {value: 5, unit: KLPH}
+    attributes: {utility: hot water, holding: "90 °C"}
+    outlet_service: PM
+    function: Heat the milk to ~90 °C before coagulation
+
+  - id: pn_vat
+    name: Paneer vat
+    kind: equipment
+    equipment_type: paneer_vat
+    group: pn_vats
+    match: [paneer vat]
+    default_capacity: {value: 1000, unit: L}
+    attributes: {utility: steam}
+    outlet_service: CM
+    function: Coagulate the hot milk with citric acid under slow agitation
+
+  - id: pn_press
+    name: Pneumatic paneer press (with hoops)
+    kind: equipment
+    equipment_type: paneer_press
+    group: pn_press
+    match: [pneumatic paneer press]
+    attributes: {hoops: "40 hoops, conveying", utility: compressed air}
+    outlet_service: PNB
+    function: Press the curd mass in hoops into blocks; whey drains to whey handling
+
+  - id: pn_cutter
+    name: Paneer block cutter
+    kind: equipment
+    equipment_type: block_cutter
+    group: pn_block
+    match: [block cutter]
+    function: Cut pressed blocks to pack size
+
+  - id: pn_cooling_tank
+    name: Paneer cooling tank
+    kind: equipment
+    equipment_type: paneer_cooling_tank
+    group: pn_block
+    match: [paneer cooling tank]
+    default_capacity: {value: 2000, unit: L}
+    attributes: {utility: chilled water}
+    function: Cool the blocks in chilled water to set texture
+
+  - id: pn_packer
+    name: Vacuum packing machine
+    kind: equipment
+    equipment_type: vacuum_packer
+    group: pn_block
+    match: [vacuum packing machine]
+    function: Vacuum-pack paneer blocks
+
+  - id: pn_out
+    name: Packed paneer out
+    kind: terminal_out
+    group: pn_block
+    label: PACKED PANEER TO COLD STORE
+    function: Battery limit — packed paneer to the cold store
+
+  # ---- coagulant dosing ------------------------------------------------------------------------------
+  - id: pn_acid_in
+    name: Citric acid solution
+    kind: terminal_in
+    group: pn_acid
+    branch: acid
+    label: CITRIC ACID SOLUTION (1-2 %) PREPARATION
+    outlet_service: CA
+    function: Battery limit — citric acid solution make-up
+
+  - id: pn_acid_tank
+    name: Citric acid tank
+    kind: equipment
+    equipment_type: acid_tank
+    group: pn_acid
+    branch: acid
+    match: [citric acid tank]
+    default_capacity: {value: 100, unit: L}
+    attributes: {utility: steam}
+    function: Hold hot citric acid solution (~70 °C)
+
+  - id: pn_acid_pump
+    name: Coagulant transfer pump
+    kind: equipment
+    equipment_type: dosing_pump
+    group: pn_acid
+    branch: acid
+    default_capacity: {value: 0.5, unit: KLPH}
+    feeds: pn_vat
+    function: Add coagulant to each vat
+
+  # ---- whey -------------------------------------------------------------------------------------------
+  - id: pn_whey_in
+    name: Whey from hoops and presses
+    kind: terminal_in
+    group: pn_whey
+    branch: whey
+    label: WHEY FROM HOOPS / PRESSES
+    outlet_service: WH
+    function: Battery limit — whey drained during hooping and pressing
+
+  - id: pn_whey_tank
+    name: Whey collection tank (whey handling system)
+    kind: equipment
+    equipment_type: whey_tank
+    group: pn_whey
+    branch: whey
+    match: [whey handling system]
+    default_capacity: {value: 5, unit: KL}
+    function: Collect whey
+
+  - id: pn_whey_pump
+    name: Whey transfer pump
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: pn_whey
+    branch: whey
+    default_capacity: {value: 5, unit: KLPH}
+    function: Transfer whey to processing or disposal
+
+  - id: pn_whey_out
+    name: Whey out
+    kind: terminal_out
+    group: pn_whey
+    branch: whey
+    label: WHEY TO WHEY PROCESSING / ETP
+    function: Battery limit — whey out of the paneer section
+
+services:
+  SM: {name: Standardized milk, fluid: standardized milk}
+  PM: {name: Heated milk, fluid: heated milk}
+  CM: {name: Curd mass, fluid: coagulated milk and whey (in hoops)}
+  PNB: {name: Paneer blocks, fluid: paneer blocks}
+  CA: {name: Citric acid solution, fluid: citric acid}
+  WH: {name: Whey, fluid: whey}
+
+symbols:
+  paneer_vat:
+    same_as: jacketed_tank
+    engineering_type: paneer_vat
+  acid_tank:
+    same_as: vessel_tank
+    engineering_type: coagulant_tank
+  whey_tank:
+    same_as: vessel_tank
+    engineering_type: whey_tank
+  paneer_cooling_tank:
+    engineering_type: block_cooling_tank
+    size: [84, 50]
+    ports:
+      inlet: {x: -42, y: -12, side: left}
+      outlet: {x: 42, y: -12, side: right}
+    graphics: |
+      <rect class="sym" x="-42" y="-25" width="84" height="50"/>
+      <path class="sym-thin" d="M-42,-12 L42,-12 M-30,-4 L-18,-4 L-18,8 L-30,8 Z M-6,-4 L6,-4 L6,8 L-6,8 Z M18,-4 L30,-4 L30,8 L18,8 Z"/>
+  paneer_press:
+    engineering_type: pneumatic_press
+    size: [60, 70]
+    ports:
+      inlet: {x: -30, y: 14, side: left}
+      outlet: {x: 30, y: 14, side: right}
+    graphics: |
+      <rect class="sym" x="-30" y="0" width="60" height="30"/>
+      <rect class="sym" x="-12" y="-34" width="24" height="18"/>
+      <path class="sym-thin" d="M0,-16 L0,-2 M-20,-2 L20,-2 M-24,10 L24,10 M-24,20 L24,20"/>
+  block_cutter:
+    engineering_type: block_cutter
+    size: [56, 40]
+    ports:
+      inlet: {x: -28, y: 0, side: left}
+      outlet: {x: 28, y: 0, side: right}
+    graphics: |
+      <rect class="sym" x="-28" y="-20" width="56" height="40"/>
+      <path class="sym-thin" d="M-12,-20 L-12,20 M0,-20 L0,20 M12,-20 L12,20"/>
+  vacuum_packer:
+    engineering_type: vacuum_packing_machine
+    size: [72, 50]
+    ports:
+      inlet: {x: -36, y: 0, side: left}
+      outlet: {x: 36, y: 0, side: right}
+    graphics: |
+      <rect class="sym" x="-36" y="-25" width="72" height="50"/>
+      <path class="sym" d="M-26,-25 L-26,-35 L26,-35 L26,-25"/>
+      <path class="sym-thin" d="M-20,5 L20,5 M-14,-5 L14,-5"/>
+
+tag_prefixes:
+  paneer_vat: T
+  acid_tank: T
+  whey_tank: T
+  paneer_cooling_tank: T
+  paneer_press: M
+  block_cutter: M
+  vacuum_packer: PK
+
+instrumentation_rules:
+  - id: IR-PN-VAT-TEMP
+    applies_to: {equipment_type: paneer_vat}
+    attach: equipment
+    instruments:
+      - {function: TT, alarms: [TAH, TAL]}
+    loop: {controller: TIC, final_element: utility_valve, setpoint: "70–75 °C"}
+    rationale: Coagulation temperature decides yield and texture; the jacket steam valve holds it.
+
+  - id: IR-PN-VAT-LEVEL
+    applies_to: {equipment_type: paneer_vat}
+    attach: equipment
+    instruments:
+      - {function: LT, alarms: [LAH]}
+    rationale: Batch volume sets the coagulant quantity.
+
+  - id: IR-PN-ACID-TANK
+    applies_to: {equipment_type: acid_tank}
+    attach: equipment
+    instruments:
+      - {function: LSL}
+      - {function: TT}
+    rationale: Enough coagulant for the batch, at the right temperature.
+
+  - id: IR-PN-PRESS-AIR
+    applies_to: {equipment_type: paneer_press}
+    attach: equipment
+    instruments:
+      - {function: PI}
+    rationale: Pressing air pressure decides block moisture.
+
+  - id: IR-PN-COOLING-TEMP
+    applies_to: {equipment_type: paneer_cooling_tank}
+    attach: equipment
+    instruments:
+      - {function: TT, alarms: [TAH]}
+    loop: {controller: TIC, final_element: utility_valve, setpoint: "4 °C"}
+    rationale: Chilled-water temperature in the cooling tank is held by its valve.
+
+  - id: IR-PN-WHEY-LEVEL
+    applies_to: {equipment_type: whey_tank}
+    attach: equipment
+    instruments:
+      - {function: LT, alarms: [LAH]}
+    rationale: Whey inventory and overflow protection.
+
+line_rules:
+  - id: LR-PN-DOSING-NRV
+    applies_to: {from_type: [dosing_pump], service: [CA]}
+    type: check_valve
+    class: manual
+    position: 0.3
+    rationale: Non-return valve so hot milk cannot flow back into the coagulant line.

@@ -1,0 +1,477 @@
+# Engineering module 7 — Curd / fermented products (the "Fermented section" of a dairy)
+# Cup and pouch curd: standardized milk → curd milk silos → transfer pump → curd milk pasteurizer →
+#   curd milk heater (to incubation temperature) → inoculation tanks (starter culture) → cup fillers
+#   (set curd incubates in the cup) and fermented pouch fillers.
+# Stirred products, from the heater's second outlet:
+#   Butter milk (chhach): setting tank → curd breaking pump → BM chiller → BM transfer pump → thermizer → BM storage.
+#   Lassi: setting tank (+ dissolved sugar) → lassi pump → lassi chiller → to HMST / pouch filling.
+# RO water: pasteurized RO water storage for lassi / butter milk standardization.
+
+id: curd
+name: Curd
+order: 7
+area: "7"
+area_name: Curd / fermented products
+# Excel section headings where this module's equipment is listed (rows there are preferred)
+sections: [fermented section, curd]
+keywords: [curd, dahi, fermented, lassi, yoghurt, yogurt, butter milk, buttermilk, chhach]
+# mass-balance products this section makes (the coverage check matches them)
+products: [curd, lassi, butter-milk, buttermilk, butter milk, chhach, dahi]
+summary: Milk → inoculation → incubation → cooling (cup curd, lassi, butter milk)
+
+groups:
+  cu_in: {default_count: 1}
+  cu_silos: {lead_stage: cu_silo, default_count: 2}
+  cu_line: {lead_stage: cu_pasteurizer, flow_stage: cu_feed_pump, default_count: 1}
+  cu_inoc: {lead_stage: cu_inoc_tank, default_count: 2}
+  cu_cups: {lead_stage: cu_cup_filler, default_count: 2}
+  cu_pouch: {lead_stage: cu_pouch_filler, default_count: 3}
+  cu_bm: {flow_stage: cu_break_pump, default_count: 1}
+  cu_lassi: {flow_stage: cu_lassi_pump, default_count: 1}
+  cu_sugar: {flow_stage: cu_sugar_pump, default_count: 1}
+  cu_ro: {flow_stage: cu_ro_pump, default_count: 1}
+  cu_cult: {default_count: 1}
+
+
+sizing:
+  - {stage: cu_silo, basis: products, products: [curd, lassi, butter-milk], storage_days: 1}
+  - {stage: cu_pasteurizer, basis: products, products: [curd, lassi, butter-milk], hours: 8}
+  - {stage: cu_cup_filler, basis: products, products: [curd cup], factor: 5, hours: 8}          # 200 g cups: 5 per kg
+  - {stage: cu_pouch_filler, basis: products, products: [curd pouch, lassi, butter-milk], factor: 2, hours: 8, per_product: true}  # 500 g pouches; one machine per product
+
+stages:
+  - id: cu_milk_in
+    name: Standardized milk for curd
+    kind: terminal_in
+    group: cu_in
+    label: STANDARDIZED MILK FROM PROCESSING
+    outlet_service: PM
+    function: Battery limit — standardized milk for fermented products
+
+  - id: cu_silo
+    name: Pasteurized curd milk storage silo
+    kind: equipment
+    equipment_type: silo
+    group: cu_silos
+    match: [curd milk storage silo]
+    default_capacity: {value: 20, unit: KL}
+    function: Store the day's curd milk
+
+  - id: cu_feed_pump
+    name: Curd milk transfer pump
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: cu_line
+    match: [curd milk transfer pump]
+    default_capacity: {value: 5, unit: KLPH}
+    attributes: {drive: VFD}
+    function: Feed the curd milk pasteurizer
+
+  - id: cu_pasteurizer
+    name: Curd milk / RO water pasteurizer
+    kind: equipment
+    equipment_type: pasteurizer
+    group: cu_line
+    match: [ro water pasteurizer]
+    default_capacity: {value: 5, unit: KLPH}
+    attributes: {utility: hot water, holding: "90 °C / 5 min"}
+    function: High heat treatment of curd milk (also pasteurizes RO water)
+
+  - id: cu_heater
+    name: Curd milk heater
+    kind: equipment
+    equipment_type: heater_phe
+    group: cu_line
+    match: [curd milk heater with hot water]
+    default_capacity: {value: 5, unit: KLPH}
+    attributes: {utility: hot water, duty: "→ 42–44 °C"}
+    outlet_service: PM
+    function: Bring the milk to incubation temperature
+
+  - id: cu_inoc_tank
+    name: Inoculation tank
+    kind: equipment
+    equipment_type: inoculation_tank
+    group: cu_inoc
+    match: [innoculation tank]
+    default_capacity: {value: 2, unit: KL}
+    attributes: {utility: hot water}
+    outlet_service: CUM
+    function: Mix starter culture into the warm milk before filling
+
+  - id: cu_cup_filler
+    name: Curd cup filling machine
+    kind: equipment
+    equipment_type: cup_filler
+    group: cu_cups
+    match: [curd cup filling machine]
+    default_capacity: {value: 2400, unit: CPH}
+    attributes: {design_flow_klph: 0.5}   # 2 400 cups/h × 200 g
+    outlet_service: PKD
+    function: Fill and seal curd cups (set curd incubates in the cup)
+
+  - id: cu_cup_out
+    name: Curd cups out
+    kind: terminal_out
+    group: cu_cups
+    label: CURD CUPS TO INCUBATION ROOM / COLD STORE
+    function: Battery limit — filled cups to incubation and cold store
+
+  # ---- fermented pouch filling (from the inoculation tanks' second outlet) --------------------------------
+  - id: cu_pouch_filler
+    name: Fermented pouch filling machine
+    kind: equipment
+    equipment_type: filler
+    group: cu_pouch
+    branch: pouch
+    source: cu_inoc_tank
+    match: [pouch filling machines, fermented]
+    default_capacity: {value: 10000, unit: PPH}
+    attributes: {design_flow_klph: 5}
+    outlet_service: PKD
+    function: Fill curd / butter milk / lassi pouches
+
+  - id: cu_pouch_out
+    name: Fermented pouches out
+    kind: terminal_out
+    group: cu_pouch
+    branch: pouch
+    label: CURD / BM / LASSI POUCHES TO INCUBATION / COLD STORE
+    function: Battery limit — packed fermented pouches
+
+  # ---- butter milk (chhach), from the heater's second outlet ----------------------------------------------
+  - id: cu_chhach_tank
+    name: Curd setting tank for chhach
+    kind: equipment
+    equipment_type: incubation_tank
+    group: cu_bm
+    branch: butter_milk
+    source: cu_heater
+    match: [curd setting tanks for chhach]
+    default_capacity: {value: 5, unit: KL}
+    attributes: {utility: "hot water, chilled water"}
+    outlet_service: CU
+    function: Set the curd for butter milk
+
+  - id: cu_break_pump
+    name: Curd breaking pump
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: cu_bm
+    branch: butter_milk
+    match: [curd breaking pump]
+    default_capacity: {value: 5, unit: KLPH}
+    function: Break the coagulum and transfer it
+
+  - id: cu_bm_chiller
+    name: PHE chiller for butter milk
+    kind: equipment
+    equipment_type: plate_heat_exchanger
+    group: cu_bm
+    branch: butter_milk
+    match: [phe chiller for butter milk]
+    default_capacity: {value: 5, unit: KLPH}
+    attributes: {utility: chilled water, duty: "→ 4–6 °C"}
+    outlet_service: BM
+    function: Cool butter milk
+
+  - id: cu_bm_pump
+    name: Butter milk transfer pump to thermizer
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: cu_bm
+    branch: butter_milk
+    match: [butter milk transfer pump to thermizer]
+    default_capacity: {value: 5, unit: KLPH}
+    function: Feed the thermizer
+
+  - id: cu_bm_thermizer
+    name: Butter milk thermizer
+    kind: equipment
+    equipment_type: heater_phe
+    group: cu_bm
+    branch: butter_milk
+    match: [butter milk thermizer]
+    default_capacity: {value: 5, unit: KLPH}
+    attributes: {utility: hot water, duty: "65 °C / 15 s, then cooled"}
+    function: Mild heat treatment for shelf life
+
+  - id: cu_bm_tank
+    name: Butter milk horizontal storage tank
+    kind: equipment
+    equipment_type: product_storage_tank
+    group: cu_bm
+    branch: butter_milk
+    match: [butter milk horizontal storage tank]
+    default_capacity: {value: 5, unit: KL}
+    function: Store butter milk for packing
+
+  - id: cu_bm_out
+    name: Butter milk out
+    kind: terminal_out
+    group: cu_bm
+    branch: butter_milk
+    label: BUTTER MILK TO POUCH FILLING
+    function: Battery limit — butter milk to the fermented pouch fillers
+
+  # ---- lassi -----------------------------------------------------------------------------------------------
+  - id: cu_lassi_in
+    name: Cultured milk for lassi
+    kind: terminal_in
+    group: cu_lassi
+    branch: lassi
+    label: WARM CURD MILK FROM CURD MILK HEATER
+    outlet_service: PM
+    function: Battery limit — curd milk for lassi (from the curd milk heater)
+
+  - id: cu_lassi_tank
+    name: Curd setting tank for lassi
+    kind: equipment
+    equipment_type: incubation_tank
+    group: cu_lassi
+    branch: lassi
+    match: [curd setting tanks for lassi]
+    default_capacity: {value: 5, unit: KL}
+    attributes: {utility: "hot water, chilled water"}
+    outlet_service: LS
+    function: Set and sweeten the lassi base
+
+  - id: cu_lassi_pump
+    name: Lassi transfer pump to HMST
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: cu_lassi
+    branch: lassi
+    match: [lassi transfer pump]
+    default_capacity: {value: 2, unit: KLPH}
+    function: Transfer lassi through the chiller
+
+  - id: cu_lassi_chiller
+    name: PHE chiller for lassi
+    kind: equipment
+    equipment_type: plate_heat_exchanger
+    group: cu_lassi
+    branch: lassi
+    match: [phe chiller for lassi]
+    default_capacity: {value: 5, unit: KLPH}
+    attributes: {utility: chilled water, duty: "→ 4–6 °C"}
+    function: Cool lassi
+
+  - id: cu_lassi_out
+    name: Lassi out
+    kind: terminal_out
+    group: cu_lassi
+    branch: lassi
+    label: LASSI TO HMST / POUCH FILLING
+    function: Battery limit — lassi to storage and packing
+
+  # ---- sugar syrup into the lassi tank -------------------------------------------------------------------------
+  - id: cu_sugar_in
+    name: Sugar and RO water
+    kind: terminal_in
+    group: cu_sugar
+    branch: sugar
+    label: SUGAR + PASTEURIZED RO WATER
+    outlet_service: SY
+    function: Battery limit — sugar and water for the syrup
+
+  - id: cu_sugar_tank
+    name: Sugar tank and dissolving unit
+    kind: equipment
+    equipment_type: sugar_tank
+    group: cu_sugar
+    branch: sugar
+    match: [sugar tank]
+    default_capacity: {value: 500, unit: L}
+    function: Dissolve sugar for lassi
+
+  - id: cu_sugar_pump
+    name: Sugar syrup recirculation / transfer pump
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: cu_sugar
+    branch: sugar
+    default_capacity: {value: 2, unit: KLPH}
+    feeds: cu_lassi_tank
+    function: Recirculate and transfer the syrup
+
+  # ---- RO water ------------------------------------------------------------------------------------------------
+  - id: cu_ro_in
+    name: RO water
+    kind: terminal_in
+    group: cu_ro
+    branch: ro_water
+    label: PASTEURIZED RO WATER FROM CURD MILK / RO WATER PASTEURIZER
+    outlet_service: ROW
+    function: Battery limit — pasteurized RO water
+
+  - id: cu_ro_tank
+    name: Pasteurized RO water storage tank
+    kind: equipment
+    equipment_type: product_storage_tank
+    group: cu_ro
+    branch: ro_water
+    match: [ro water storage tank]
+    default_capacity: {value: 5, unit: KL}
+    function: Store pasteurized RO water
+
+  - id: cu_ro_pump
+    name: RO water transfer pump
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: cu_ro
+    branch: ro_water
+    match: [ro water transfer pump]
+    default_capacity: {value: 5, unit: KLPH}
+    function: Transfer RO water for dilution
+
+  - id: cu_ro_out
+    name: RO water out
+    kind: terminal_out
+    group: cu_ro
+    branch: ro_water
+    label: RO WATER TO LASSI / BUTTER MILK STANDARDIZATION
+    function: Battery limit — RO water to the setting tanks
+
+  # ---- starter culture --------------------------------------------------------------------------------------
+  - id: cu_culture_in
+    name: Bulk starter
+    kind: terminal_in
+    group: cu_cult
+    branch: culture
+    label: BULK STARTER CULTURE
+    outlet_service: CUL
+    function: Battery limit — bulk starter from the culture room
+
+  - id: cu_culture_tank
+    name: Starter culture tank
+    kind: equipment
+    equipment_type: culture_tank
+    group: cu_cult
+    branch: culture
+    default_capacity: {value: 200, unit: L}
+    function: Hold the active starter culture at 20–22 °C
+
+  - id: cu_culture_pump
+    name: Culture dosing pump
+    kind: equipment
+    equipment_type: dosing_pump
+    group: cu_cult
+    branch: culture
+    default_capacity: {value: 0.1, unit: KLPH}
+    feeds: cu_inoc_tank
+    function: Inoculate the milk with the starter (1–2 %)
+
+services:
+  PM: {name: Pasteurized milk, fluid: pasteurized milk}
+  CUM: {name: Inoculated milk, fluid: inoculated milk}
+  CU: {name: Curd, fluid: curd}
+  BM: {name: Butter milk, fluid: butter milk}
+  LS: {name: Lassi, fluid: lassi}
+  SY: {name: Sugar syrup, fluid: sugar syrup}
+  ROW: {name: RO water, fluid: pasteurized RO water}
+  CUL: {name: Starter culture, fluid: culture}
+
+symbols:
+  incubation_tank:
+    same_as: jacketed_tank
+    engineering_type: curd_setting_tank
+  inoculation_tank:
+    same_as: jacketed_tank
+    engineering_type: inoculation_tank
+  culture_tank:
+    same_as: jacketed_tank
+    engineering_type: culture_tank
+  sugar_tank:
+    same_as: jacketed_tank
+    engineering_type: sugar_dissolving_tank
+  product_storage_tank:
+    same_as: vessel_tank
+    engineering_type: product_storage_tank
+  cup_filler:
+    engineering_type: cup_filling_machine
+    size: [80, 64]
+    ports:
+      inlet: {x: -40, y: -16, side: left}
+      outlet: {x: 40, y: 16, side: right}
+    graphics: |
+      <rect class="sym" x="-40" y="-24" width="80" height="56"/>
+      <path class="sym" d="M-26,-24 L-18,-38 L18,-38 L26,-24"/>
+      <path class="sym-thin" d="M-28,32 L-24,20 L-16,20 L-12,32 M-4,32 L0,20 L8,20 L12,32 M20,32 L24,20 L28,20"/>
+
+tag_prefixes:
+  incubation_tank: T
+  inoculation_tank: T
+  culture_tank: T
+  sugar_tank: T
+  product_storage_tank: T
+  cup_filler: PK
+
+instrumentation_rules:
+  - id: IR-CU-INCUBATION-TEMP
+    applies_to: {equipment_type: incubation_tank}
+    attach: equipment
+    instruments:
+      - {function: TT, alarms: [TAH, TAL]}
+    loop: {controller: TIC, final_element: utility_valve, setpoint: "42 °C"}
+    rationale: Setting temperature is held by the jacket valve; fermentation time depends on it.
+
+  - id: IR-CU-INCUBATION-PH
+    applies_to: {equipment_type: incubation_tank}
+    attach: equipment
+    instruments:
+      - {function: AT, alarms: [AAL]}
+    rationale: pH shows when the set point (≈ 4.6) is reached and cooling must start.
+
+  - id: IR-CU-INCUBATION-LEVEL
+    applies_to: {equipment_type: incubation_tank}
+    attach: equipment
+    instruments:
+      - {function: LT, alarms: [LAH]}
+    rationale: Batch volume for the culture ratio and overfill protection.
+
+  - id: IR-CU-INOCULATION
+    applies_to: {equipment_type: inoculation_tank}
+    attach: equipment
+    instruments:
+      - {function: TT, alarms: [TAH, TAL]}
+      - {function: LT, alarms: [LAH, LAL]}
+    loop: {controller: TIC, final_element: utility_valve, setpoint: "43 °C"}
+    rationale: Filling temperature and level of the inoculated milk.
+
+  - id: IR-CU-CULTURE-TEMP
+    applies_to: {equipment_type: culture_tank}
+    attach: equipment
+    instruments:
+      - {function: TT, alarms: [TAH]}
+    rationale: Starter activity depends on its temperature.
+
+  - id: IR-CU-STORAGE
+    applies_to: {equipment_type: product_storage_tank}
+    attach: equipment
+    instruments:
+      - {function: LT, alarms: [LAH, LAL]}
+      - {function: TT, alarms: [TAH]}
+    rationale: Inventory and cold-chain temperature of the stored product.
+
+  - id: IR-CU-SUGAR
+    applies_to: {equipment_type: sugar_tank}
+    attach: equipment
+    instruments:
+      - {function: LT, alarms: [LAL]}
+    rationale: Syrup available for the batch.
+
+line_rules:
+  - id: LR-CU-DOSING-NRV
+    applies_to: {from_type: [dosing_pump], service: [CUL]}
+    type: check_valve
+    class: manual
+    position: 0.3
+    rationale: Non-return valve so milk cannot flow back into the culture line.
+
+  - id: LR-CU-FILLER-INLET
+    applies_to: {to_type: [cup_filler, filler]}
+    type: on_off_valve
+    class: automated
+    position: 0.5
+    rationale: Automated inlet valve closes when the filler stops.

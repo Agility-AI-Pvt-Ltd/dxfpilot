@@ -75,11 +75,58 @@ equipment:
     ports:
       inlet: {x: -30, y: -14, side: left}
       outlet: {x: 30, y: -14, side: right}
+      aux_out: {x: 14, y: 24, side: right}   # second product (cream / sludge)
     graphics: |
       <path class="sym" d="M-30,-26 L30,-26 L12,14 L-12,14 Z"/>
       <rect class="sym" x="-14" y="14" width="28" height="20"/>
       <circle class="sym-thin" cx="0" cy="24" r="6"/>
       <line class="sym-thin" x1="0" y1="-26" x2="0" y2="-36"/>
+
+  # ---- shared building blocks of the engineering modules -------------------------------------
+  vessel_tank:
+    engineering_type: vertical_process_tank
+    size: [60, 116]
+    ports:
+      inlet: {x: -30, y: -36, side: left}
+      outlet: {x: 30, y: 46, side: right}
+      aux_in: {x: 0, y: -58, side: top}      # side feed (dosing, return)
+      aux_out: {x: -22, y: 56, side: bottom}  # bottom drain / second product (serum, whey)
+    graphics: |
+      <path class="sym" d="M-30,-44 Q-30,-58 0,-58 Q30,-58 30,-44 L30,44 Q30,58 0,58 Q-30,58 -30,44 Z"/>
+      <line class="sym-thin" x1="-22" y1="54" x2="-22" y2="68"/><line class="sym-thin" x1="22" y1="54" x2="22" y2="68"/>
+
+  jacketed_tank:
+    engineering_type: jacketed_agitated_tank
+    size: [64, 120]
+    ports:
+      inlet: {x: -32, y: -36, side: left}
+      outlet: {x: 32, y: 48, side: right}
+      aux_in: {x: 18, y: -60, side: top}
+      aux_out: {x: -22, y: 58, side: bottom}
+    graphics: |
+      <path class="sym" d="M-32,-46 Q-32,-60 0,-60 Q32,-60 32,-46 L32,46 Q32,60 0,60 Q-32,60 -32,46 Z"/>
+      <path class="sym-thin" d="M-26,-20 L-26,44 Q-26,53 0,53 Q26,53 26,44 L26,-20"/>
+      <path class="sym-thin" d="M0,-74 L0,26 M-12,26 L12,26 M-12,20 L-12,32 M12,20 L12,32"/>
+      <circle class="sym" cy="-80" r="6"/>
+
+  dosing_pump:
+    engineering_type: metering_pump
+    size: [36, 36]
+    ports:
+      inlet: {x: -16, y: 0, side: left}
+      outlet: {x: 16, y: 0, side: right}
+    graphics: |
+      <circle class="sym" r="16"/>
+      <path class="sym-thin" d="M-4,-12 Q8,0 -4,12"/>
+      <path class="sym-thin" d="M-12,16 L-16,22 L16,22 L12,16"/>
+
+  heater_phe:
+    same_as: plate_heat_exchanger
+    engineering_type: plate_heat_exchanger_heater
+    ports:
+      inlet: {x: -22, y: 0, side: left}
+      outlet: {x: 22, y: 0, side: right}
+      aux_out: {x: 22, y: 24, side: right}    # second product outlet (split to another use)
 
 piping_nodes:
   terminal_in:
@@ -117,6 +164,10 @@ inline:
       <path class="sym-bg" d="M0,0 L-7,14 L7,14 Z"/>
       <line class="sym-thin" x1="0" y1="0" x2="0" y2="-14"/>
       <path class="sym-bg" d="M-9,-14 Q0,-26 9,-14 Z"/>
+  globe_valve:
+    graphics: |
+      <path class="sym-bg" d="M-9,-7 L9,7 L9,-7 L-9,7 Z"/>
+      <circle class="sym-fill" r="3.5"/>
   flow_element:
     graphics: |
       <rect class="sym-bg" x="-10" y="-8" width="20" height="16"/>

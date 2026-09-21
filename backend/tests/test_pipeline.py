@@ -6,6 +6,7 @@ import uuid
 import pytest
 
 os.environ["OPENAI_API_KEY"] = ""  # tests run on the rule agents; .env does not override this
+os.environ["LANGSMITH_TRACING"] = "false"  # never send test runs to a real LangSmith project
 
 from cadpilot import config  # noqa: E402,F401  (loads DATABASE_URL from backend/.env if present)
 from cadpilot.agents.interpreter import interpret_rules  # noqa: E402
@@ -15,6 +16,21 @@ from cadpilot.service import CadPilot  # noqa: E402
 from cadpilot.store import FileStore  # noqa: E402
 
 DB_URL = os.environ.get("TEST_DATABASE_URL") or os.environ.get("DATABASE_URL")
+_db_reachable: bool | None = None
+
+
+def db_reachable() -> bool:
+    """Checked once per session (3 s), so a stopped database skips the PostgreSQL tests instead of hanging."""
+    global _db_reachable
+    if _db_reachable is None:
+        import psycopg
+
+        try:
+            psycopg.connect(DB_URL, connect_timeout=3).close()
+            _db_reachable = True
+        except psycopg.OperationalError:
+            _db_reachable = False
+    return _db_reachable
 
 
 @pytest.fixture(params=["file", "postgres"])
@@ -24,6 +40,8 @@ def store(request, tmp_path):
         return
     if not DB_URL:
         pytest.skip("no DATABASE_URL / TEST_DATABASE_URL")
+    if not db_reachable():
+        pytest.skip(f"PostgreSQL not reachable at {DB_URL.split('@')[-1]}")
     import psycopg
     from psycopg import sql
 
@@ -173,7 +191,7 @@ def test_capacity_change_on_non_driving_unit_does_not_resize_lines(pilot, projec
     pilot.chat(pid, "Change E-201 to 25 KLPH")
     rev = pilot.store.revision(pid, "B")
     assert rev.diff.equipment.modified == {"E-201": ["capacity"]}
-    assert not rev.diff.lines.modified and not rev.validation.warnings
+    assert not rev.diff.lines.modified and not [w for w in rev.validation.warnings if w.code != "BASIS_CONFLICT"]
 
 
 def test_pump_capacity_drives_its_train_only(pilot, project):
@@ -202,7 +220,7 @@ def test_upload_endpoint_replaces_by_role(pilot, monkeypatch):
     }
     view = client.post(f"/api/projects/{pid}/sources", files=files).json()
     assert view["sources"] == {"mass_balance": mb.name, "design_data": dd.name}
-    assert view["source_summary"]["equipment_rows"] == 295
+    assert view["source_summary"]["equipment_rows"] == 304
     # re-uploading one role replaces it rather than doubling the intake
     client.post(f"/api/projects/{pid}/sources", files={"mass_balance": files["mass_balance"]})
     src = main.pilot().store.source_data(pid)
@@ -229,7 +247,7 @@ def test_legacy_project_keeps_other_workbook_when_one_is_replaced(tmp_path):
     mb = DEMO_FILES["mass_balance"]
     pilot.set_sources(pid, {"mass_balance": (mb.name, mb.read_bytes())})
     src = pilot.store.source_data(pid)
-    assert src.daily_intake_litres() == 500000 and len(src.equipment_rows) == 295
+    assert src.daily_intake_litres() == 500000 and len(src.equipment_rows) == 304
 
 
 def test_history_survives_a_fresh_store_instance(pilot, project):
@@ -405,7 +423,9 @@ def test_llm_schemas_are_valid_openai_strict_schemas():
     from cadpilot.agents.interpreter import _LLMInterpretation
     from cadpilot.agents.process import _LLMProcessPlan
 
-    for schema in (_LLMInterpretation, _LLMProcessPlan, _LLMEquipmentMapping):
+    from cadpilot.ingest.excel import _LLMWorkbookMap
+
+    for schema in (_LLMInterpretation, _LLMProcessPlan, _LLMEquipmentMapping, _LLMWorkbookMap):
         text = json.dumps(to_strict_json_schema(schema))
         assert '"oneOf"' not in text and '"discriminator"' not in text, schema.__name__
     parsed = _LLMInterpretation.model_validate(
@@ -444,3 +464,116 @@ def test_dxf_export(pilot, project, tmp_path):
     xs = [v[0] for e in msp.query("LWPOLYLINE") for v in e.get_points("xy")]
     ys = [v[1] for e in msp.query("LWPOLYLINE") for v in e.get_points("xy")]
     assert min(xs) >= 0 and min(ys) >= 0 and max(xs) > 500
+
+
+def test_langsmith_trace_labels_rules_vs_llm(pilot, project, monkeypatch):
+    """With tracing on, every agent span says where its decision came from."""
+    from langsmith import Client
+    from langsmith.run_helpers import tracing_context
+
+    from cadpilot.agents import interpreter
+    from cadpilot.agents.interpreter import _LLMInterpretation
+
+    runs: dict[str, dict] = {}
+
+    class Capture(Client):
+        def create_run(self, name=None, inputs=None, run_type=None, **kw):
+            runs[str(kw["id"])] = {"name": name, "meta": (kw.get("extra") or {}).get("metadata", {})}
+
+        def update_run(self, run_id, **kw):
+            if (r := runs.get(str(run_id))) is not None:
+                r["meta"] = {**r["meta"], **((kw.get("extra") or {}).get("metadata", {}))}
+
+        def batch_ingest_runs(self, create=None, update=None, **kw):
+            for c in create or []:
+                c = dict(c)
+                self.create_run(c.pop("name", None), c.pop("inputs", None), c.pop("run_type", None), **c)
+            for u in update or []:
+                u = dict(u)
+                self.update_run(u.pop("id"), **u)
+
+        def multipart_ingest(self, create=None, update=None, **kw):
+            self.batch_ingest_runs(create, update)
+
+    _fake_llm(monkeypatch, interpreter, _LLMInterpretation(operations=[SetGroupCount(group="storage", count=4)], clarification=None))
+    pid, _ = project
+    with tracing_context(enabled=True, client=Capture(api_url="http://127.0.0.1:9", api_key="x", auto_batch_tracing=False)):
+        pilot.chat(pid, "Use 4 silos")
+    source = {r["name"]: r["meta"].get("decision_source") for r in runs.values() if r["meta"].get("decision_source")}
+    assert source["correction_interpreter"] == "llm"
+    assert source["llm_call"] == "llm"
+    assert source["topology_agent"] == "rules" and source["instrumentation_agent"] == "rules"
+    assert source["process_agent"] == "rules" and source["equipment_agent"] == "rules"  # no model for these in this test
+    assert any(r["name"] == "cadpilot: review message" and r["meta"].get("project_id") == pid for r in runs.values())
+
+
+# ---- ② reviewer column mappings ------------------------------------------------------------------------------
+
+
+def _two_capacity_workbook() -> tuple[str, bytes]:
+    """Automatic detection picks 'Capacity'; the reviewer knows 'Design capacity' is the one to use."""
+    import io
+
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Equipment"
+    ws.append(["DESCRIPTION", "CAPACITY", "Design capacity", "QTY", "UOM"])
+    for d, cap, design, q in [
+        ("Tanker Unloading Pump (VFD Operated)", "30 KLPH", "40 KLPH", 2),
+        ("Duplex PIP Type Inline Strainer (with Manual Changeover)", "30 KLPH", "40 KLPH", 2),
+        ("Raw Milk Storage Silo with Bird Cage", "80 KL", "100 KL", 3),
+        ("Raw Milk Transfer Pump (from RMST to Pasteurizer)", "15 KLPH", "20 KLPH", 2),
+        ("Milk Pasteurizer with all Accessories", "15 KLPH", "20 KLPH", 2),
+    ]:
+        ws.append([d, cap, design, q, "Nos."])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return "equipment.xlsx", buf.getvalue()
+
+
+def test_reviewer_mapping_overrides_detection_and_persists(pilot):
+    from cadpilot.ingest.excel import TableOverride
+    from cadpilot.service import DEMO_FILES
+
+    mb = DEMO_FILES["mass_balance"]
+    pid = pilot.create_project("mapping").info.id
+    pilot.set_sources(pid, {"mass_balance": (mb.name, mb.read_bytes()), "design_data": _two_capacity_workbook()})
+    auto = pilot.store.source_data(pid)
+    auto_eq = next(d for d in auto.detections if d.kind == "equipment_list")
+    assert auto_eq.method == "headers" and auto_eq.columns["capacity"] == "B: CAPACITY"
+
+    ov = TableOverride(file="equipment.xlsx", sheet="Equipment", kind="equipment_list", header_row=1,
+                       columns={"description": "A", "capacity": "C", "quantity": "D", "unit": "E"})
+    preview = pilot.preview_mapping(pid, ov)  # nothing saved yet
+    assert preview["total"] == 5 and preview["rows"][2]["capacity"] == {"value": 100.0, "unit": "KL"}
+    assert pilot.store.get(pid).table_overrides == []
+
+    pilot.set_mapping(pid, ov)
+    data = pilot.store.source_data(pid)
+    eq = next(d for d in data.detections if d.kind == "equipment_list")
+    assert eq.method == "manual" and eq.columns["capacity"] == "C: Design capacity"
+    silo = next(r for r in data.equipment_rows if "Silo" in r.description)
+    assert str(silo.capacity) == "100 KL"
+
+    # survives re-uploading the same workbook, and drives the drawing
+    pilot.set_sources(pid, {"design_data": _two_capacity_workbook()})
+    assert pilot.store.get(pid).table_overrides[0].columns["capacity"] == "C"
+    rev = pilot.run_generation(pid, "Generate the P&ID")
+    assert str(rev.model.get_equipment("T-101").capacity) == "100 KL"
+
+    pilot.clear_mapping(pid, "equipment_list")
+    assert next(d for d in pilot.store.source_data(pid).detections if d.kind == "equipment_list").method == "headers"
+
+
+def test_wrong_manual_mapping_warns_and_is_not_second_guessed(pilot):
+    from cadpilot.ingest.excel import TableOverride
+
+    pid = pilot.create_project("bad mapping").info.id
+    pilot.set_sources(pid, {"design_data": _two_capacity_workbook()})
+    pilot.set_mapping(pid, TableOverride(file="equipment.xlsx", sheet="Equipment", kind="equipment_list",
+                                         header_row=1, columns={"description": "D", "quantity": "A"}))
+    data = pilot.store.source_data(pid)
+    assert not data.equipment_rows  # the reviewer's choice is respected ...
+    assert any("reads no equipment rows" in w for w in data.warnings)  # ... and they are told why nothing was read

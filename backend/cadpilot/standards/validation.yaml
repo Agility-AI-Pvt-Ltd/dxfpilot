@@ -6,6 +6,11 @@ data:
   processing_max_hours_per_day: 20
   raw_storage_min_fraction_of_daily_intake: 0.5
   max_line_velocity_m_s: 2.5
+  # mechanical machines whose "capacity" in a cost estimate is usually "Suitable" — no warning
+  # design-data rows that are not P&ID items (not reported as "not drawn")
+  not_pid_items: [hose, hoist, trolley, table, weigh, scale, bridge, printer, coder, sealer, platform, monorail,
+                  spare, tool, furniture, crate conveying, conveyor, leaky pouch, fume extraction, check weigh]
+  capacity_optional_types: [paneer_press, block_cutter, vacuum_packer, cup_filler, tin_filler, powder_packer, filler, fluid_bed]
 
 topology:
   # A continuous process path must exist from every inlet battery limit to an outlet battery limit

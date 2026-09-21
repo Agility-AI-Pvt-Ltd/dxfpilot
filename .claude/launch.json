@@ -4,14 +4,29 @@
     {
       "name": "api",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "cd backend && uv run uvicorn cadpilot.api.main:app --port 8000"],
+      "runtimeArgs": [
+        "-c",
+        "cd backend && uv run uvicorn cadpilot.api.main:app --port 8000"
+      ],
       "port": 8000
     },
     {
       "name": "web",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "cd frontend && npm run dev"],
+      "runtimeArgs": [
+        "-c",
+        "cd frontend && npm run dev"
+      ],
       "port": 3000
+    },
+    {
+      "name": "api-filestore",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd backend && DATABASE_URL= uv run uvicorn cadpilot.api.main:app --port 8000"
+      ],
+      "port": 8000
     }
   ]
 }

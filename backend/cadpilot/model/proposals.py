@@ -40,6 +40,7 @@ class EquipmentProposal(Proposal):
     equipment: list[Equipment] = Field(default_factory=list)
     group_counts: dict[str, int] = Field(default_factory=dict)
     source_rows: dict[str, str] = Field(default_factory=dict)  # stage id -> matched source row
+    sizing: list[dict] = Field(default_factory=list)  # mass-balance sizing per stage (engine.selection)
 
 
 class TopologyProposal(Proposal):

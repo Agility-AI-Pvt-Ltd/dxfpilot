@@ -15,6 +15,11 @@ templates:
       reception: {lead_stage: unloading_pump, flow_stage: unloading_pump, default_count: 2}
       storage: {lead_stage: raw_milk_silo, default_count: 3}
       processing: {lead_stage: pasteurizer, flow_stage: raw_milk_transfer_pump, default_count: 2}
+    # mass balance ÷ unit capacity (engine/selection.py)
+    sizing:
+      - {stage: unloading_pump, basis: intake, hours: 8}
+      - {stage: raw_milk_silo, basis: intake, storage_days: 0.5}
+      - {stage: pasteurizer, basis: intake, hours: 20, unit_basis: processing_line_klph}
     stages:
       - id: tanker_inlet
         name: Road milk tanker unloading point

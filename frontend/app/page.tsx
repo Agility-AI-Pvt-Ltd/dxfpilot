@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import StartScreen from "@/components/StartScreen";
 import Workspace from "@/components/Workspace";
+import type { Engine } from "@/lib/api";
 
-type Open = { id: string; request: string } | null;
+type Open = { id: string; request: string; engine?: Engine; modules?: string[]; detect?: boolean } | null;
 
 /** The URL is the source of truth for which draft is open: ?p=<id>, or no ?p for the new-draft screen. */
 function fromUrl(): Open {
@@ -26,9 +27,9 @@ export default function Home() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  const open = useCallback((id: string, request: string) => {
+  const open = useCallback((id: string, request: string, engine?: Engine, modules?: string[], detect?: boolean) => {
     window.history.pushState(null, "", `?p=${id}`);
-    setProject({ id, request });
+    setProject({ id, request, engine, modules, detect });
   }, []);
 
   const newDraft = useCallback(() => {
@@ -50,6 +51,9 @@ export default function Home() {
       key={project.id}
       projectId={project.id}
       initialRequest={project.request}
+      initialEngine={project.engine}
+      initialModules={project.modules}
+      initialDetect={project.detect}
       onOpenProject={(id) => open(id, "")}
       onExit={newDraft}
     />

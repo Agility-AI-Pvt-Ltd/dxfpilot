@@ -8,26 +8,37 @@ Configured in backend/.env (see .env.example):
   OPENAI_BASE_URL   optional OpenAI-compatible endpoint (default: OpenAI)
 
 Every call is recorded (see `record_calls`) so it is auditable which answers came from the model.
+
+LangSmith tracing (optional): set LANGSMITH_TRACING=true and LANGSMITH_API_KEY. Every draft/correction
+becomes one trace; each agent is tagged with its `decision_source` (llm / rules / cached / fallback)
+and every model call shows its prompt, reply, tokens and served model.
 """
 
 from __future__ import annotations
 
 import concurrent.futures
+import contextvars
 import hashlib
 import logging
 import os
 import time
+import warnings
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Literal, TypeVar
 
 import openai
+from langsmith import traceable
+from langsmith.run_helpers import get_current_run_tree
+from langsmith.wrappers import wrap_openai
 from pydantic import BaseModel, Field, ValidationError
 
 from .. import config  # noqa: F401  (loads backend/.env)
 
 log = logging.getLogger(__name__)
+# openai/langsmith log a parsed structured reply through a generic serializer; harmless, but noisy
+warnings.filterwarnings("ignore", message=r"(?s)Pydantic serializer warnings.*PydanticSerializationUnexpectedValue")
 T = TypeVar("T", bound=BaseModel)
 
 DEFAULT_MODEL = "gpt-4.1"
@@ -55,6 +66,21 @@ class LLMCall(BaseModel):
 _calls: ContextVar[list[LLMCall] | None] = ContextVar("cadpilot_llm_calls", default=None)
 
 
+def mark_source(source: str, **metadata: object) -> None:
+    """Label the current LangSmith span with where its decision came from (no-op without tracing).
+
+    source: "llm", "rules", "cached", or "rules (fallback: <why>)".
+    """
+    run = get_current_run_tree()
+    if run is None:
+        return
+    run.metadata["decision_source"] = source
+    run.metadata.update(metadata)
+    tag = "llm" if source == "llm" else "cached" if source == "cached" else "rules"
+    if tag not in run.tags:
+        run.tags.append(tag)
+
+
 @contextmanager
 def record_calls() -> Iterator[list[LLMCall]]:
     """Collect every LLM call made inside this block (including LangGraph worker threads)."""
@@ -71,11 +97,14 @@ class LLM:
         self.model = os.environ.get("OPENAI_MODEL") or DEFAULT_MODEL
         api_key = os.environ.get("OPENAI_API_KEY")
         self._client = (
-            openai.OpenAI(
-                api_key=api_key,
-                base_url=os.environ.get("OPENAI_BASE_URL") or DEFAULT_BASE_URL,
-                timeout=CALL_TIMEOUT_S,
-                max_retries=0,
+            # wrap_openai: each model call appears in LangSmith (prompt, reply, tokens) when tracing is on
+            wrap_openai(
+                openai.OpenAI(
+                    api_key=api_key,
+                    base_url=os.environ.get("OPENAI_BASE_URL") or DEFAULT_BASE_URL,
+                    timeout=300,  # socket limit only; each call's wall-clock limit is enforced below
+                    max_retries=0,
+                )
             )
             if api_key
             else None
@@ -85,9 +114,10 @@ class LLM:
     def enabled(self) -> bool:
         return self._client is not None
 
+    @traceable(name="llm_call", run_type="chain", process_inputs=lambda d: {"purpose": d.get("purpose"), "schema": d["schema"].__name__})
     def structured(
         self, system: str, prompt: str, schema: type[T], purpose: str,
-        memory: dict[str, dict] | None = None, max_tokens: int = 16000,
+        memory: dict[str, dict] | None = None, max_tokens: int = 16000, timeout_s: float | None = None,
     ) -> T | None:
         """One structured call. Returns None (caller falls back to rules) on any failure.
 
@@ -102,6 +132,7 @@ class LLM:
                 cached = schema.model_validate(memory[key]["answer"])
                 self._record(LLMCall(purpose=purpose, model=self.model, served_model=memory[key].get("served_model"),
                                      outcome="cached", latency_ms=0, detail="reused answer for unchanged inputs"))
+                mark_source("cached", purpose=purpose, outcome="cached")
                 return cached
             except ValidationError:
                 memory.pop(key, None)
@@ -110,7 +141,9 @@ class LLM:
         served = detail = None
         usage = None
         try:
+            # copy_context: keeps the LangSmith parent span (and the call recorder) in the worker thread
             future = _pool.submit(
+                contextvars.copy_context().run,
                 self._client.chat.completions.parse,
                 model=self.model,
                 messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}],
@@ -118,7 +151,7 @@ class LLM:
                 max_completion_tokens=max_tokens,
             )
             try:
-                completion = future.result(timeout=CALL_TIMEOUT_S)
+                completion = future.result(timeout=timeout_s or CALL_TIMEOUT_S)
             except concurrent.futures.TimeoutError:
                 future.cancel()  # the request thread finishes on its own; its answer is ignored
                 raise openai.APITimeoutError(request=None) from None  # type: ignore[arg-type]
@@ -133,7 +166,7 @@ class LLM:
         except openai.APIStatusError as exc:
             outcome, detail = "api_error", f"{exc.status_code}: {exc.message}"
         except openai.APITimeoutError:
-            outcome, detail = "timeout", f"no answer within {CALL_TIMEOUT_S}s"
+            outcome, detail = "timeout", f"no answer within {timeout_s or CALL_TIMEOUT_S}s"
         except openai.APIConnectionError as exc:
             outcome, detail = "unreachable", str(exc)
         except (openai.LengthFinishReasonError, openai.ContentFilterFinishReasonError) as exc:
@@ -153,6 +186,11 @@ class LLM:
             detail=(detail or "")[:500],
         )
         self._record(call)
+        mark_source(
+            "llm" if outcome == "ok" else f"rules (fallback: {outcome})",
+            purpose=purpose, outcome=outcome, requested_model=self.model, served_model=served,
+            latency_ms=call.latency_ms, detail=call.detail,
+        )
         if outcome == "ok" and result is not None and memory is not None:
             memory[key] = {"answer": result.model_dump(mode="json"), "served_model": served, "purpose": purpose}
         if outcome == "ok":

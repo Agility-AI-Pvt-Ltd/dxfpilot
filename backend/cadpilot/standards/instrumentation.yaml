@@ -3,7 +3,8 @@
 #
 # applies_to: equipment_type or stage
 # attach:     equipment | inlet_line | outlet_line
-# loop.final_element: utility_valve | upstream_pump_vfd | downstream_pump_vfd | outlet_diversion_valve
+# loop.final_element: utility_valve | upstream_pump_vfd | downstream_pump_vfd | self_vfd |
+#                     outlet_diversion_valve | inlet_control_valve | outlet_control_valve
 
 rules:
   - id: IR-DEAERATOR-LEVEL
@@ -83,12 +84,23 @@ rules:
     rationale: Pasteurization temperature is controlled by the hot-water valve.
 
   - id: IR-PASTEURIZER-DIVERSION
-    applies_to: {equipment_type: pasteurizer}
+    # the classic line diverts at the pasteurizer outlet; the pasteurization module diverts after its
+    # own holding tube (see modules/pasteurization.yaml)
+    applies_to: {stage: [pasteurizer, cr_pasteurizer]}
     attach: outlet_line
     instruments:
       - {function: TSL}
     loop: {controller: TSL, final_element: outlet_diversion_valve, kind: interlock, setpoint: "< 72 °C"}
     rationale: Under-pasteurized milk must be diverted automatically (flow diversion valve interlock).
+
+  # ---- equipment types shared by several engineering modules --------------------------------------
+  - id: IR-HEATER-TEMP
+    applies_to: {equipment_type: heater_phe}
+    attach: outlet_line
+    instruments:
+      - {function: TT, alarms: [TAH, TAL]}
+    loop: {controller: TIC, final_element: utility_valve, setpoint: "per duty"}
+    rationale: Outlet temperature of a heater is controlled by its heating-medium (steam / hot water) valve.
 
 symbols:
   field: instrument_field

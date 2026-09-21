@@ -26,7 +26,9 @@ from ..model.intent import (
     SetGroupCount,
     ToggleStage,
 )
-from .llm import get_llm
+from langsmith import traceable
+
+from .llm import get_llm, mark_source
 
 TAG_RE = r"[A-Z]{1,4}-\d{2,4}"
 _NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6}
@@ -158,7 +160,14 @@ Act whenever the intent is clear. Only return no operations with a clarification
 could reasonably mean two different model changes."""
 
 
+@traceable(name="correction_interpreter", run_type="chain", process_inputs=lambda d: {"message": d["message"], "selected": d.get("selected")})
 def interpret(message: str, model: EngineeringModel, selected: str | None = None) -> ChangeRequest:
+    change = _interpret(message, model, selected)
+    mark_source(change.interpreter, operations=[op.model_dump() for op in change.operations], clarification=change.clarification)
+    return change
+
+
+def _interpret(message: str, model: EngineeringModel, selected: str | None = None) -> ChangeRequest:
     rules = interpret_rules(message, selected)
     llm = get_llm()
     if llm.enabled:

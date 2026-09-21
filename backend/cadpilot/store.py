@@ -24,7 +24,7 @@ from . import config  # noqa: F401  (loads backend/.env)
 from .agents.llm import LLMCall
 from .engine.revisions import ModelDiff
 from .engine.tags import TagRegistry
-from .ingest.excel import SourceData
+from .ingest.excel import SourceData, TableOverride
 from .model.engineering import EngineeringModel, ProjectInfo
 from .model.intent import ChangeRequest, DesignIntent
 from .model.proposals import ValidationReport
@@ -74,6 +74,7 @@ class ProjectRecord(BaseModel):
     revisions: list[str] = Field(default_factory=list)
     chat: list[ChatMessage] = Field(default_factory=list)
     corrections: list[ChangeRequest] = Field(default_factory=list)  # structured learning record
+    table_overrides: list[TableOverride] = Field(default_factory=list)  # reviewer column mappings
 
     @field_validator("sources", mode="before")
     @classmethod

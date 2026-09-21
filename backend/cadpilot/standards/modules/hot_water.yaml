@@ -1,0 +1,100 @@
+# Engineering module 5 — Hot water generation and distribution
+# Hot-water return → buffer tank → circulation pumps → steam-heated hot-water generator →
+# one supply per hot-water user found in the other modules.
+
+id: hot_water
+name: Hot water
+order: 5
+area: "5"
+area_name: Hot water generation & distribution
+# Excel section headings where this module's equipment is listed (rows there are preferred)
+sections: [hot water]
+keywords: [hot water]
+summary: Hot-water generation → distribution
+utility: hot water
+
+groups:
+  hw_ret: {default_count: 1}
+  hw_pumps: {lead_stage: hw_pump, flow_stage: hw_pump, default_count: 2}
+  hw_gen: {default_count: 1}
+  hw_users: {default_count: 1}
+
+stages:
+  - id: hw_return
+    name: Hot water return
+    kind: terminal_in
+    group: hw_ret
+    label: HOT WATER RETURN FROM USERS
+    outlet_service: HWR
+    function: Battery limit — hot water returning from the users
+
+  - id: hw_tank
+    name: Hot water buffer / expansion tank
+    kind: equipment
+    equipment_type: hw_tank
+    group: hw_ret
+    default_capacity: {value: 5, unit: KL}
+    function: Buffer volume and expansion of the closed hot-water loop
+
+  - id: hw_pump
+    name: Hot water circulation pump
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: hw_pumps
+    default_capacity: {value: 20, unit: KLPH}
+    function: Circulate hot water to the users (1 working + 1 standby)
+
+  - id: hw_generator
+    name: Hot water generator (steam PHE)
+    kind: equipment
+    equipment_type: heater_phe
+    group: hw_gen
+    match: [hot water generation system]
+    default_capacity: {value: 40, unit: KLPH}
+    attributes: {utility: steam, duty: "→ 80 °C"}
+    outlet_service: HWS
+    function: Heat the circulating water with steam
+
+  - id: hw_users
+    name: Hot water to users
+    kind: terminal_out
+    group: hw_users
+    utility_users: hot water
+    label: HOT WATER TO
+    function: Battery limit — hot-water supply to a consumer
+
+services:
+  HWR: {name: Hot water return, fluid: hot water}
+  HWS: {name: Hot water supply, fluid: hot water}
+
+symbols:
+  hw_tank:
+    same_as: vessel_tank
+    engineering_type: hot_water_tank
+
+tag_prefixes:
+  hw_tank: T
+
+instrumentation_rules:
+  - id: IR-HW-TANK
+    applies_to: {equipment_type: hw_tank}
+    attach: equipment
+    instruments:
+      - {function: LT, alarms: [LAL]}
+      - {function: TT}
+    rationale: Low level protects the circulation pumps; return temperature shows the load of the users.
+
+  - id: IR-HW-SUPPLY-PRESSURE
+    applies_to: {stage: hw_generator}
+    attach: outlet_line
+    instruments:
+      - {function: PI}
+    rationale: Supply pressure indication for balancing the loop.
+
+line_rules:
+  - id: LR-HOTWATER-USER-ISOLATION
+    applies_to: {to_type: [terminal_out], service: [HWS]}
+    type: butterfly_valve
+    class: manual
+    position: 0.6
+    rationale: Isolation valve on every hot-water take-off so a user can be serviced without draining the loop.

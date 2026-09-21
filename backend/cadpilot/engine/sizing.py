@@ -6,7 +6,8 @@ import math
 
 from ..model.engineering import Quantity
 
-_TO_M3H = {"KLPH": 1.0, "LPH": 0.001, "m3/h": 1.0}
+# water-equivalent m³/h; mass flows (steam, hot water) use 1 m³/h = 1000 kg/h
+_TO_M3H = {"KLPH": 1.0, "LPH": 0.001, "m3/h": 1.0, "kg/h": 0.001, "t/h": 1.0}
 
 
 def flow_m3h(q: Quantity | None) -> float | None:

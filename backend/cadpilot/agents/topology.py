@@ -3,7 +3,11 @@ and the piping valves required by line rules. Fully deterministic graph construc
 
 from __future__ import annotations
 
-from ..engine.sizing import flow_m3h, select_dn
+from langsmith import traceable
+
+from ..engine import line_rules
+from ..engine.flows import LineFlows
+from ..engine.merge import consumers
 from ..model.engineering import (
     Equipment,
     InlineComponent,
@@ -16,10 +20,12 @@ from ..model.engineering import (
 )
 from ..model.proposals import TopologyProposal
 from .context import AgentContext
+from .llm import mark_source
 
 AGENT = "topology_agent"
 
 
+@traceable(name="topology_agent", run_type="chain", process_inputs=lambda d: d["ctx"].trace_summary())
 def run(ctx: AgentContext, process: ProcessDefinition, equipment: list[Equipment]) -> TopologyProposal:
     tagger = ctx.tagger
     tpl_stages = {s["id"]: s for s in ctx.template["stages"]}
@@ -32,6 +38,7 @@ def run(ctx: AgentContext, process: ProcessDefinition, equipment: list[Equipment
     kinds: dict[str, str] = {}  # tag -> equipment type / piping node kind
     group_of: dict[str, str] = {}
     area_of: dict[str, str] = {}
+    module_of = {st.id: st.module for st in process.stages}
 
     for st in process.stages:
         count = process.groups.get(st.group, 1)
@@ -41,10 +48,19 @@ def run(ctx: AgentContext, process: ProcessDefinition, equipment: list[Equipment
             for e in items:
                 kinds[e.tag] = e.type
         else:
+            users = consumers(st.utility_users, st.module, equipment, module_of) if st.utility_users else []
+            train_labels = process.group_labels.get(st.group, [])
             tags = []
             for train in range(1, count + 1):
                 tag = tagger.piping_node(f"{st.id}#{train}", st.kind, st.area)
                 label = tpl_stages[st.id].get("label", st.name)
+                if train <= len(users):  # a utility outlet names the consumer it serves
+                    label = f"{label} {users[train - 1].tag} {users[train - 1].name.split(' — ')[0].split(' (')[0]}".upper()
+                elif train <= len(train_labels):
+                    label = f"{label} — {train_labels[train - 1]}".upper()
+                other = next((o for o in process.stages if o.id == st.connects_to), None)
+                if other is not None:  # the connected module is on this drawing: say where
+                    label = f"{label} (AREA {other.area})"
                 nodes.append(
                     PipingNode(
                         tag=tag,
@@ -64,51 +80,77 @@ def run(ctx: AgentContext, process: ProcessDefinition, equipment: list[Equipment
             area_of[t] = st.area
 
     # ---- connections ----------------------------------------------------------------------
-    edges: list[tuple[str, str, str]] = []  # (from, to, service)
-    service = "RM"
+    # (from, to, service, from port override, to port override)
+    edges: list[tuple[str, str, str, str | None, str | None]] = []
     port_counter: dict[str, int] = {}
+    stage_by_id = {st.id: st for st in process.stages}
 
     def next_port(tag: str, prefix: str) -> str:
         port_counter[f"{tag}:{prefix}"] = port_counter.get(f"{tag}:{prefix}", 0) + 1
         return f"{prefix}{port_counter[f'{tag}:{prefix}']}"
 
-    for a, b in zip(process.stages, process.stages[1:]):
-        if a.outlet_service:
-            service = a.outlet_service
-        ups, downs = members.get(a.id, []), members.get(b.id, [])
+    def connect(a, b, ups: list[str], downs: list[str], service: str, out_port: str | None = None, in_port: str | None = None) -> None:
+        """Stage a → stage b: train by train when they match, otherwise through one header."""
         if not ups or not downs:
             warnings.append(f"No items for stage transition {a.id} → {b.id}")
-            continue
-        if a.group == b.group and len(ups) == len(downs):
-            edges += [(u, d, service) for u, d in zip(ups, downs)]
-        else:
-            hdr = tagger.piping_node(f"header:{a.id}>{b.id}", "header", b.area)
-            nodes.append(
-                PipingNode(
-                    tag=hdr,
-                    kind="header",
-                    label=f"{a.name} → {b.name} manifold",
-                    area=b.area,
-                    provenance=Provenance(
-                        agent=AGENT,
-                        rule="TOPO-MANIFOLD",
-                        rationale=f"{len(ups)} {a.group} unit(s) feed {len(downs)} {b.group} unit(s): manifold required",
-                    ),
-                )
+            return
+        if len(ups) == len(downs) and (a.group == b.group or a.branch or b.branch or len(ups) == 1):
+            # train by train; a single unit feeding a single unit needs no header either
+            edges.extend((u, d, service, out_port, in_port) for u, d in zip(ups, downs))
+            return
+        hdr = tagger.piping_node(f"header:{a.id}>{b.id}", "header", b.area)
+        nodes.append(
+            PipingNode(
+                tag=hdr,
+                kind="header",
+                label=f"{a.name} → {b.name} manifold",
+                area=b.area,
+                provenance=Provenance(
+                    agent=AGENT,
+                    rule="TOPO-MANIFOLD",
+                    rationale=f"{len(ups)} {a.group} unit(s) feed {len(downs)} {b.group} unit(s): manifold required",
+                ),
             )
-            kinds[hdr] = "header"
-            area_of[hdr] = b.area
-            edges += [(u, hdr, service) for u in ups] + [(hdr, d, service) for d in downs]
+        )
+        kinds[hdr] = "header"
+        area_of[hdr] = b.area
+        edges.extend((u, hdr, service, out_port, None) for u in ups)
+        edges.extend((hdr, d, service, None, in_port) for d in downs)
+
+    # every module (and a classic template) is a main chain plus optional side branches
+    chains: dict[tuple[str | None, str | None], list] = {}
+    for st in process.stages:
+        chains.setdefault((st.module, st.branch), []).append(st)
+    for (_module, branch), chain in chains.items():
+        service = chain[0].outlet_service or "RM"
+        if branch and chain[0].source in members:  # the branch leaves a stage through its second outlet
+            src = stage_by_id[chain[0].source]
+            carried = chain[0].source_service or src.outlet_service or service  # e.g. cream from a separator
+            connect(src, chain[0], members[src.id], members[chain[0].id], carried, out_port="aux_out")
+        for a, b in zip(chain, chain[1:]):
+            if a.outlet_service:
+                service = a.outlet_service
+            connect(a, b, members.get(a.id, []), members.get(b.id, []), service)
+    for (_module, branch), chain in chains.items():
+        last = chain[-1]
+        if not branch or not last.feeds or last.feeds not in members:
+            continue
+        target = stage_by_id[last.feeds]
+        downs = [t for i, t in enumerate(members[target.id], 1) if not last.feeds_trains or i in last.feeds_trains]
+        fed = {e[1] for e in edges}
+        # a unit that already has its main inlet takes the side feed on its auxiliary inlet
+        in_port = "aux_in" if any(d in fed for d in downs) else None
+        connect(last, target, members.get(last.id, []), downs, last.outlet_service or chain[0].outlet_service or "RM", in_port=in_port)
 
     # ---- bypasses (reviewer intent) --------------------------------------------------------
     bypass_edges: list[tuple[str, str, str]] = []
     for target in ctx.intent.bypasses:
-        ins = [e for e in edges if e[1] == target]
-        outs = [e for e in edges if e[0] == target]
+        ins = [e for e in edges if e[1] == target and e[4] is None]
+        outs = [e for e in edges if e[0] == target and e[3] is None]
         if len(ins) != 1 or len(outs) != 1:
             warnings.append(f"Bypass around {target} skipped: it needs exactly one inlet and one outlet line")
             continue
-        (a_, _, s_in), (_, b_, s_out) = ins[0], outs[0]
+        (a_, _, s_in, ap, _), (_, b_, s_out, _, bp) = ins[0], outs[0]
         area = area_of.get(target, "1")
         j1 = tagger.piping_node(f"bypass:{target}:in", "tee", area)
         j2 = tagger.piping_node(f"bypass:{target}:out", "tee", area)
@@ -127,95 +169,47 @@ def run(ctx: AgentContext, process: ProcessDefinition, equipment: list[Equipment
             group_of[j] = group_of.get(target, "")
         edges.remove(ins[0])
         edges.remove(outs[0])
-        edges += [(a_, j1, s_in), (j1, target, s_in), (target, j2, s_out), (j2, b_, s_out)]
-        bypass_edges.append((j1, j2, s_in))
+        edges += [(a_, j1, s_in, ap, None), (j1, target, s_in, None, None), (target, j2, s_out, None, None), (j2, b_, s_out, None, bp)]
+        bypass_edges.append((j1, j2, s_in, None, None))
 
-    # ---- flows ----------------------------------------------------------------------------
-    # Each train's design flow is set by its flow-driving stage (the pump); groups without one
-    # fall back to the largest flow-rated unit in the group.
-    cap = {e.tag: flow_m3h(e.capacity) for e in equipment}
+    # ---- flows (shared with the IR compiler) ----------------------------------------------------
     train_of = {e.tag: e.train for e in equipment} | {n.tag: n.train for n in nodes}
-    group_flow: dict[str, float] = {}
-    for st in process.stages:
-        for t in members.get(st.id, []):
-            f = cap.get(t)
-            if f:
-                group_flow[st.group] = max(group_flow.get(st.group, 0), f)
-    train_flow: dict[tuple[str, int | None], float] = {}
-    for g, gcfg in ctx.template["groups"].items():
-        for e in equipment:
-            if e.stage == gcfg.get("flow_stage") and cap.get(e.tag):
-                train_flow[(g, e.train)] = cap[e.tag]  # type: ignore[assignment]
-
-    def unit_flow(tag: str) -> float | None:
-        g = group_of.get(tag, "")
-        return train_flow.get((g, train_of.get(tag))) or group_flow.get(g)
-
+    links = [(a, b) for st in process.stages if st.connects_to in members
+             for a in members[st.id] for b in members[st.connects_to]]
+    links += [(b, a) for a, b in list(links) if kinds.get(a) == "terminal_in"]  # declared on the inlet side
+    links = [(a, b) for a, b in links if kinds.get(a) == "terminal_out"]
+    flows = LineFlows([(e[0], e[1]) for e in edges], kinds, group_of, train_of, equipment, ctx.template, links)
     all_edges = edges + bypass_edges
 
-    def flow_from(tag: str, seen: frozenset = frozenset()) -> float | None:
-        if tag in seen:
-            return None
-        if kinds.get(tag) in ("header", "tee"):
-            ins = [f for (u, d, _) in edges if d == tag for f in [flow_from(u, seen | {tag})] if f]
-            if kinds.get(tag) == "tee":
-                return max(ins) if ins else None
-            return sum(ins) if ins else None
-        if kinds.get(tag) == "terminal_in" or unit_flow(tag) and group_of.get(tag) in group_flow:
-            return unit_flow(tag)
-        # volume-type units (silos): outflow = total downstream demand
-        downs = [d for (u, d, _) in edges if u == tag]
-        demand = 0.0
-        for d in downs:
-            if kinds.get(d) == "header":
-                demand += sum(unit_flow(x) or 0 for (u2, x, _) in edges if u2 == d)
-            else:
-                demand += unit_flow(d) or 0
-        return demand or None
-
     # ---- lines + line-rule valves ---------------------------------------------------------
-    target_v = rules["sizing"]["target_velocity_m_s"]
-    series = rules["sizing"]["dn_series"]
     spec = rules["spec"]["default"]
-    valve_rules = {v["applies_to"]: [] for v in rules["valves"]}
-    for v in rules["valves"]:
-        valve_rules[v["applies_to"]].append(v)
+    mod_of_area = line_rules.module_of_area(process)
 
     lines: list[Line] = []
-    for u, d, svc in all_edges:
-        is_bypass = (u, d, svc) in bypass_edges
+    for u, d, svc, out_port, in_port in all_edges:
+        is_bypass = (u, d, svc, out_port, in_port) in bypass_edges
         key = f"{u}>{d}"
         area = area_of.get(u) or area_of.get(d) or "1"
         tag = tagger.line(key, svc, area)
-        f = flow_from(u)
-        if kinds.get(u) == "header" and unit_flow(d):
-            # a manifold branch carries what the train it feeds draws
-            f = unit_flow(d)
-        from_port = "outlet" if kinds.get(u) not in ("header", "tee") else ("branch" if is_bypass else next_port(u, "out"))
-        to_port = "inlet" if kinds.get(d) not in ("header", "tee") else ("branch" if is_bypass else next_port(d, "in"))
-        applies: list[str] = []
-        if is_bypass:
-            applies.append("bypass")
-        if kinds.get(d) == "centrifugal_pump":
-            applies.append("pump_suction")
-        if kinds.get(u) == "centrifugal_pump":
-            applies.append("pump_discharge")
-        if "header" in (kinds.get(u), kinds.get(d)):
-            applies.append("header_branch")
+        f = flows.line_flow(u, d)
+        from_port = out_port or ("outlet" if kinds.get(u) not in ("header", "tee") else ("branch" if is_bypass else next_port(u, "out")))
+        to_port = in_port or ("inlet" if kinds.get(d) not in ("header", "tee") else ("branch" if is_bypass else next_port(d, "in")))
+        kind = "bypass" if is_bypass else "process"
         inline: list[InlineComponent] = []
-        for a in applies:
-            for vr in valve_rules.get(a, []):
-                # identity follows what the valve serves, so re-routing a line keeps its valves
-                owner = {"pump_suction": d, "pump_discharge": u}.get(a, key)
-                vtag = tagger.valve(f"{vr['id']}:{owner}", vr["class"], area)
-                inline.append(
-                    InlineComponent(
-                        tag=vtag,
-                        type=vr["type"],
-                        position=vr["position"],
-                        provenance=Provenance(agent=AGENT, rule=vr["id"], rationale=vr["rationale"]),
-                    )
+        for vr in rules["valves"]:
+            if not line_rules.in_scope(vr, area, mod_of_area) or not line_rules.applies(vr["applies_to"], kinds.get(u), kinds.get(d), kind, svc):
+                continue
+            # identity follows what the valve serves, so re-routing a line keeps its valves
+            vtag = tagger.valve(f"{vr['id']}:{line_rules.owner(vr['applies_to'], u, d)}", vr["class"], area)
+            inline.append(
+                InlineComponent(
+                    tag=vtag,
+                    type=vr["type"],
+                    position=vr["position"],
+                    provenance=Provenance(agent=AGENT, rule=vr["id"], rationale=vr["rationale"]),
                 )
+            )
+        value, unit = line_rules.flow_quantity(rules, svc, f) if f else (0, "")
         lines.append(
             Line(
                 tag=tag,
@@ -223,10 +217,10 @@ def run(ctx: AgentContext, process: ProcessDefinition, equipment: list[Equipment
                 to=PortRef(item=d, port=to_port),
                 service=svc,
                 stream=svc,
-                kind="bypass" if is_bypass else "process",
-                design_flow=Quantity(value=round(f, 2), unit="KLPH") if f else None,
-                size_dn=select_dn(f, target_v, series) if f else None,
-                spec=spec,
+                kind=kind,
+                design_flow=Quantity(value=value, unit=unit) if f else None,
+                size_dn=line_rules.size(rules, svc, f) if f else None,
+                spec=rules["spec"].get("by_service", {}).get(svc, spec),
                 inline=sorted(inline, key=lambda c: c.position),
                 provenance=Provenance(
                     agent=AGENT,
@@ -238,4 +232,5 @@ def run(ctx: AgentContext, process: ProcessDefinition, equipment: list[Equipment
         if not f:
             warnings.append(f"{tag}: design flow could not be determined; line not sized")
 
+    mark_source("rules", rules="process template + line_rules.yaml")
     return TopologyProposal(piping_nodes=nodes, lines=lines, warnings=warnings)

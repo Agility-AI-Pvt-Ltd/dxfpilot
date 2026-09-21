@@ -2,8 +2,10 @@
 
 import { Fragment } from "react";
 import type { Provenance, Revision } from "@/lib/api";
+import DerivedFrom from "./DerivedFrom";
 
 type Props = {
+  projectId: string;
   rev: Revision;
   tag: string;
   onSelect: (tag: string) => void;
@@ -50,7 +52,7 @@ function Tags({ tags, onSelect }: { tags: string[]; onSelect: (t: string) => voi
   );
 }
 
-export default function Inspector({ rev, tag, onSelect, onClose, onAsk }: Props) {
+export default function Inspector({ projectId, rev, tag, onSelect, onClose, onAsk }: Props) {
   const m = rev.model;
   const eq = m.equipment.find((e) => e.tag === tag);
   const line = m.lines.find((l) => l.tag === tag);
@@ -161,6 +163,7 @@ export default function Inspector({ rev, tag, onSelect, onClose, onAsk }: Props)
       </header>
       <div className="body">
         {body ?? <p className="empty">Not found in this revision.</p>}
+        {body && <DerivedFrom projectId={projectId} revision={rev.revision} tag={tag} />}
         {prov && <Why p={prov} />}
         {issues.length > 0 && (
           <div>

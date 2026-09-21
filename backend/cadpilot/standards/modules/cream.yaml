@@ -1,0 +1,152 @@
+# Engineering module 9 — Cream separation and handling
+# Warm milk (from pasteurizer regeneration) → separators → skim milk back to the pasteurizer;
+# cream (second separator outlet) → buffer tank → cream pump → cream pasteurizer → cooler →
+# cream storage / ripening tanks → to the butter and ghee sections.
+
+id: cream
+name: Cream
+order: 9
+area: "9"
+area_name: Cream separation & handling
+# Excel section headings where this module's equipment is listed (rows there are preferred)
+sections: [cream, processing]
+keywords: [cream, separator, skimming, skim milk]
+summary: Separator → cream handling → storage
+
+groups:
+  cr_in: {default_count: 1}
+  cr_sep: {lead_stage: cr_separator, default_count: 2}
+  cr_buf: {default_count: 1}
+  cr_line: {lead_stage: cr_pasteurizer, flow_stage: cr_pump, default_count: 1}
+  cr_store: {lead_stage: cr_storage_tank, default_count: 3}
+  cr_out: {default_count: 1}
+
+
+sizing:
+  - {stage: cr_separator, basis: intake, hours: 20}           # all milk skimmed / standardized in 20 h
+
+stages:
+  - id: cr_milk_in
+    name: Warm milk from the pasteurizer regeneration section
+    kind: terminal_in
+    group: cr_in
+    label: WARM MILK FROM PASTEURIZER REGENERATION
+    outlet_service: RM
+    function: Battery limit — milk at 45–55 °C for separation
+
+  - id: cr_separator
+    name: Self-cleaning cream separator
+    kind: equipment
+    equipment_type: centrifugal_separator
+    group: cr_sep
+    match: [self cleaning, centrifuge]
+    default_capacity: {value: 30, unit: KLPH}
+    outlet_service: SM
+    function: Separate cream from skim milk (standardization)
+
+  - id: cr_skim_out
+    name: Skim milk back to the pasteurizer
+    kind: terminal_out
+    group: cr_sep
+    label: SKIM / STANDARDIZED MILK BACK TO PASTEURIZER
+    function: Battery limit — skim / standardized milk back to the pasteurizer
+
+  # ---- cream line: from the separators' cream outlet ------------------------------------------------
+  - id: cr_buffer_tank
+    name: Cream buffer tank
+    kind: equipment
+    equipment_type: buffer_tank
+    group: cr_buf
+    branch: cream
+    source: cr_separator
+    source_service: CRM   # the separators' second outlet is cream
+    match: [cream buffer tank]
+    default_capacity: {value: 5, unit: KL}
+    outlet_service: CRM
+    function: Collect cream from the separators
+
+  - id: cr_pump
+    name: Cream transfer pump to cream pasteurizer
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: cr_line
+    branch: cream
+    match: [cream transfer pump, cream pasteurizer]
+    default_capacity: {value: 5, unit: KLPH}
+    attributes: {drive: VFD}
+    function: Feed the cream pasteurizer at constant flow
+
+  - id: cr_pasteurizer
+    name: Cream pasteurizer
+    kind: equipment
+    equipment_type: pasteurizer
+    group: cr_line
+    branch: cream
+    match: [cream pasteurizer with all accessories]
+    default_capacity: {value: 5, unit: KLPH}
+    attributes: {utility: hot water, holding: "85 °C / 15 s"}
+    function: Pasteurize cream
+
+  - id: cr_cooler
+    name: Cream cooler
+    kind: equipment
+    equipment_type: plate_heat_exchanger
+    group: cr_line
+    branch: cream
+    default_capacity: {value: 5, unit: KLPH}
+    attributes: {utility: chilled water, duty: "→ 8–10 °C"}
+    function: Cool pasteurized cream for storage / ripening
+
+  - id: cr_storage_tank
+    name: Cream storage cum ripening tank
+    kind: equipment
+    equipment_type: cream_tank
+    group: cr_store
+    branch: cream
+    match: [cream storage cum ripening tank]
+    default_capacity: {value: 10, unit: KL}
+    attributes: {utility: chilled water}
+    function: Store and ripen cream
+
+  - id: cr_to_butter
+    name: Cream to butter / ghee
+    kind: terminal_out
+    group: cr_out
+    branch: cream
+    label: CREAM TO BUTTER / GHEE SECTION
+    function: Battery limit — cream to the butter churn or ghee section
+
+services:
+  RM: {name: Raw milk, fluid: raw milk}
+  SM: {name: Skim / standardized milk, fluid: skim milk}
+  CRM: {name: Cream, fluid: cream}
+
+symbols:
+  buffer_tank:
+    same_as: vessel_tank
+    engineering_type: buffer_tank
+  cream_tank:
+    same_as: jacketed_tank
+    engineering_type: cream_ripening_tank
+
+tag_prefixes:
+  buffer_tank: T
+  cream_tank: T
+
+instrumentation_rules:
+  - id: IR-CR-BUFFER-LEVEL
+    applies_to: {equipment_type: buffer_tank}
+    attach: equipment
+    instruments:
+      - {function: LT, alarms: [LAL, LAH]}
+    loop: {controller: LIC, final_element: downstream_pump_vfd, setpoint: "50 %"}
+    rationale: Buffer level sets the cream pump speed so the separators never back up.
+
+  - id: IR-CR-STORAGE
+    applies_to: {equipment_type: cream_tank}
+    attach: equipment
+    instruments:
+      - {function: LT, alarms: [LAH]}
+      - {function: TT, alarms: [TAH]}
+    loop: {controller: TIC, final_element: utility_valve, setpoint: "8 °C"}
+    rationale: Ripening / storage temperature is held by the chilled-water jacket valve.

@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, streamPost, type Project, type ProgressEvent, type Revision } from "@/lib/api";
+import { api, BasisConflictError, streamPost, type Engine, type Project, type ProgressEvent, type Revision } from "@/lib/api";
+import BasisPanel from "./BasisPanel";
 import Chat from "./Chat";
 import DataPanel from "./DataPanel";
 import Inspector from "./Inspector";
@@ -11,11 +12,19 @@ import Sidebar from "./Sidebar";
 
 type Tab = "drawing" | "validation" | "changes" | "lists" | "decisions";
 
-type Props = { projectId: string; initialRequest: string; onExit: () => void; onOpenProject: (id: string) => void };
+type Props = {
+  projectId: string;
+  initialRequest: string;
+  initialEngine?: Engine;
+  initialModules?: string[];
+  initialDetect?: boolean;
+  onExit: () => void;
+  onOpenProject: (id: string) => void;
+};
 
 const SIDEBAR_KEY = "cadpilot.sidebar";
 
-export default function Workspace({ projectId, initialRequest, onExit, onOpenProject }: Props) {
+export default function Workspace({ projectId, initialRequest, initialEngine, initialModules, initialDetect, onExit, onOpenProject }: Props) {
   const [project, setProject] = useState<Project | null>(null);
   const [revLetter, setRevLetter] = useState<string | null>(null);
   const [rev, setRev] = useState<Revision | null>(null);
@@ -27,6 +36,10 @@ export default function Workspace({ projectId, initialRequest, onExit, onOpenPro
   const [error, setError] = useState<string | null>(null);
   const [llm, setLlm] = useState<boolean | null>(null);
   const [showData, setShowData] = useState(false);
+  // a draft waiting for design-basis decisions, and the basis panel
+  const [basisGate, setBasisGate] = useState<{ path: string; body: Record<string, unknown> } | null>(null);
+  const [showBasis, setShowBasis] = useState(false);
+  const [basisConflicts, setBasisConflicts] = useState(0);
   const [sidebar, setSidebar] = useState(true);
 
   useEffect(() => {
@@ -80,7 +93,14 @@ export default function Workspace({ projectId, initialRequest, onExit, onOpenPro
         await refresh((result.revision as string) || undefined);
         if (result.revision) setTab((t) => (t === "drawing" ? t : "changes"));
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        if (e instanceof BasisConflictError) {
+          // the workbooks disagree on design numbers: a human decides before the solver runs
+          setBasisGate({ path, body: (body ?? {}) as Record<string, unknown> });
+          setBasisConflicts(e.conflicts.length);
+          setShowBasis(true);
+        } else {
+          setError(e instanceof Error ? e.message : String(e));
+        }
         await refresh();
       } finally {
         setLive(null);
@@ -89,16 +109,27 @@ export default function Workspace({ projectId, initialRequest, onExit, onOpenPro
     [refresh],
   );
 
+  useEffect(() => {
+    api.basis(projectId)
+      .then((b) => setBasisConflicts(b.parameters.filter((p) => p.status === "conflict").length))
+      .catch(() => undefined);
+  }, [projectId, project?.current]);
+
   // First visit: load, and generate immediately if there is no draft yet (autonomous first draft)
   useEffect(() => {
     if (started.current) return;
     started.current = true;
     refresh().then((p) => {
       if (p.current) return;
-      if (p.source_summary?.equipment_rows) run(`/api/projects/${projectId}/generate`, { request: initialRequest || "Generate the P&ID" });
+      if (p.source_summary?.equipment_rows) run(`/api/projects/${projectId}/generate`, {
+          request: initialRequest || "Generate the P&ID",
+          engine: initialEngine,
+          modules: initialModules,
+          detect_modules: !!initialDetect,
+        });
       else setShowData(true); // no usable data yet: ask for the workbooks
     });
-  }, [projectId, initialRequest, refresh, run]);
+  }, [projectId, initialRequest, initialEngine, initialModules, initialDetect, refresh, run]);
 
   const send = (text?: string) => {
     const msg = (text ?? input).trim();
@@ -144,6 +175,10 @@ export default function Workspace({ projectId, initialRequest, onExit, onOpenPro
         </span>
         <button className="btn small" onClick={() => setShowData(true)} disabled={!project || !!live} title="View or replace the mass balance and design data workbooks">
           Design data
+        </button>
+        <button className="btn small" onClick={() => setShowBasis(true)} disabled={!project || !!live}
+                title="The design numbers the solver uses, their sources, and your approvals">
+          Design basis{basisConflicts ? <span className="count err" style={{ marginLeft: 6 }}>{basisConflicts}</span> : null}
         </button>
         <span className="spacer" />
         {llm !== null && <span className={`badge ${llm ? "info" : "plain"} hide-sm`} title={llm ? "LLM reasoning enabled" : "Rule-based agents (no LLM key configured)"}>{llm ? "LLM agents" : "Rule agents"}</span>}
@@ -247,6 +282,7 @@ export default function Workspace({ projectId, initialRequest, onExit, onOpenPro
               <PidViewer svg={svg} selected={selected} onSelect={select} focusKey={`${projectId}:${rev.revision}`} />
               {selected && (
                 <Inspector
+                  projectId={projectId}
                   rev={rev}
                   tag={selected}
                   onSelect={select}
@@ -267,13 +303,38 @@ export default function Workspace({ projectId, initialRequest, onExit, onOpenPro
         </section>
       </div>
       </div>
+      {showBasis && (
+        <BasisPanel
+          projectId={projectId}
+          pending={!!basisGate}
+          onClose={() => {
+            setShowBasis(false);
+            setBasisGate(null);
+          }}
+          onApproved={() => {
+            setShowBasis(false);
+            setBasisConflicts(0);
+            const gate = basisGate;
+            setBasisGate(null);
+            if (gate) run(gate.path, gate.body);
+          }}
+          onProvisional={() => {
+            setShowBasis(false);
+            const gate = basisGate;
+            setBasisGate(null);
+            if (gate) run(gate.path, { ...gate.body, provisional: true });
+          }}
+        />
+      )}
       {showData && project && (
         <DataPanel
           project={project}
           onClose={() => setShowData(false)}
           onUploaded={setProject}
-          onRegenerate={() =>
+          onRegenerate={(engine, modules) =>
             run(`/api/projects/${projectId}/generate`, {
+              engine,
+              modules,
               request: project.current ? "Regenerate the draft from the updated design data" : initialRequest || "Generate the P&ID",
             })
           }

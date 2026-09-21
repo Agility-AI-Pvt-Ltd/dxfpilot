@@ -1,0 +1,288 @@
+# Engineering module 8 — Ghee (the "Ghee making & packing" section)
+# Butter / cream → butter pump → continuous butter melter → molten butter pump → prestratification
+# tanks (serum and moisture drawn off to the serum separator) → ghee boilers (steam) → ghee pump →
+# clarifier → settling tanks → ghee balance tank → storage-cum-granulation tanks → packing: pouch
+# packer, 15 kg tin filler, 1 L tin filler.
+
+id: ghee
+name: Ghee
+order: 8
+area: "8"
+area_name: Ghee making & packing
+# Excel section headings where this module's equipment is listed (rows there are preferred)
+sections: [ghee]
+keywords: [ghee, butter oil, clarified butter]
+# mass-balance products this section makes (the coverage check matches them)
+products: [ghee]
+summary: Cream/butter → heating → clarification → filtration → packing
+
+groups:
+  gh_in: {lead_stage: gh_butter_pump, flow_stage: gh_butter_pump, default_count: 1}
+  gh_pre: {lead_stage: gh_prestrat, default_count: 2}
+  gh_kettles: {lead_stage: gh_kettle, default_count: 2}
+  gh_clar: {lead_stage: gh_clarifier, flow_stage: gh_transfer_pump, default_count: 1}
+  gh_settle: {lead_stage: gh_settling_tank, default_count: 2}
+  gh_bal: {default_count: 1}
+  gh_store: {lead_stage: gh_storage_tank, default_count: 2}
+  gh_pack: {lead_stage: gh_filler, default_count: 3}
+  gh_serum: {lead_stage: gh_serum_separator, default_count: 1}
+
+
+sizing:
+  - {stage: gh_melter, basis: products, products: [ghee], factor: 1.25, hours: 8}          # ~1.25 kg butter per kg ghee
+  - {stage: gh_prestrat, basis: products, products: [ghee], factor: 1.25, hours: 8, batch_cycle_h: 4}
+  - {stage: gh_kettle, basis: products, products: [ghee], factor: 1.25, hours: 8, batch_cycle_h: 4}
+  - {stage: gh_settling_tank, basis: products, products: [ghee], factor: 1.1, storage_days: 1}   # ~1.1 L per kg ghee
+  - {stage: gh_storage_tank, basis: products, products: [ghee], factor: 1.1, storage_days: 1}
+
+stages:
+  - id: gh_butter_in
+    name: Butter / cream from the butter section
+    kind: terminal_in
+    group: gh_in
+    label: WHITE BUTTER / CREAM FROM BUTTER SECTION
+    outlet_service: BT
+    function: Battery limit — butter or cream for ghee
+
+  - id: gh_butter_pump
+    name: Butter pump (positive displacement)
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: gh_in
+    match: [butter pump positive displacement]
+    default_capacity: {value: 3, unit: KLPH}
+    attributes: {pump_type: positive displacement}
+    function: Feed butter to the melter
+
+  - id: gh_melter
+    name: Continuous butter melter
+    kind: equipment
+    equipment_type: butter_melter
+    group: gh_in
+    match: [continuous butter melter]
+    default_capacity: {value: 3, unit: KLPH}
+    attributes: {utility: hot water}
+    outlet_service: MB
+    function: Melt butter with hot water to ~50 °C
+
+  - id: gh_melt_pump
+    name: Molten butter transfer pump
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: gh_in
+    match: [molten butter transfer pump]
+    default_capacity: {value: 3, unit: KLPH}
+    function: Charge the prestratification tanks
+
+  - id: gh_prestrat
+    name: Prestratification tank
+    kind: equipment
+    equipment_type: prestrat_tank
+    group: gh_pre
+    match: [prestratification tank]
+    default_capacity: {value: 1, unit: KL}
+    attributes: {utility: hot water}
+    function: Hold molten butter at ~80 °C so serum and moisture settle out before boiling
+
+  - id: gh_kettle
+    name: Ghee boiler (steam-jacketed kettle)
+    kind: equipment
+    equipment_type: ghee_kettle
+    group: gh_kettles
+    match: [ghee boiler]
+    default_capacity: {value: 1, unit: KL}
+    attributes: {utility: steam}
+    outlet_service: GH
+    function: Boil off the moisture and develop flavour at 110–120 °C
+
+  - id: gh_transfer_pump
+    name: Ghee transfer pump
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: gh_clar
+    match: [ghee transfer pump]
+    default_capacity: {value: 5, unit: KLPH}
+    function: Transfer ghee through the clarifier
+
+  - id: gh_clarifier
+    name: Ghee clarifier
+    kind: equipment
+    equipment_type: centrifugal_separator
+    group: gh_clar
+    match: [ghee clarifier]
+    default_capacity: {value: 2, unit: KLPH}
+    function: Remove ghee residue (burnt milk solids)
+
+  - id: gh_settling_tank
+    name: Ghee settling tank
+    kind: equipment
+    equipment_type: settling_tank
+    group: gh_settle
+    match: [ghee settling tanks]
+    default_capacity: {value: 2, unit: KL}
+    function: Settle fine residue
+
+  - id: gh_balance_tank
+    name: Ghee balance tank
+    kind: equipment
+    equipment_type: ghee_balance_tank
+    group: gh_bal
+    match: [ghee balance tank]
+    default_capacity: {value: 200, unit: L}
+    function: Constant head for the storage / granulation tanks
+
+  - id: gh_storage_tank
+    name: Ghee storage cum granulation tank
+    kind: equipment
+    equipment_type: granulation_tank
+    group: gh_store
+    match: [ghee storage cum granulation]
+    default_capacity: {value: 2, unit: KL}
+    attributes: {utility: "hot water, chilled water"}
+    function: Store ghee and develop the grain by controlled cooling
+
+  - id: gh_filler
+    name: Ghee packing machine
+    kind: equipment
+    equipment_type: filler
+    group: gh_pack
+    train_match: [[ghee pouch packing machine], [ghee tin filler], [tin filling machine for 1 l]]
+    attributes: {design_flow_klph: 1}
+    outlet_service: PKD
+    function: Pack ghee in pouches, 15 kg tins and 1 L tins
+
+  - id: gh_out
+    name: Packed ghee out
+    kind: terminal_out
+    group: gh_pack
+    label: PACKED GHEE TO STORE
+    function: Battery limit — packed ghee to the finished goods store
+
+  # ---- serum from the prestratification tanks ----------------------------------------------------------
+  - id: gh_serum_separator
+    name: Serum separator
+    kind: equipment
+    equipment_type: centrifugal_separator
+    group: gh_serum
+    branch: serum
+    source: gh_prestrat
+    source_service: SR    # serum drawn off the bottom of the prestratification tanks
+    match: [serum separator]
+    default_capacity: {value: 2, unit: KLPH}
+    outlet_service: SR
+    function: Recover fat from the serum drawn off the prestratification tanks
+
+  - id: gh_serum_out
+    name: Serum out
+    kind: terminal_out
+    group: gh_serum
+    branch: serum
+    label: SERUM TO BUTTER MILK HANDLING / ETP
+    function: Battery limit — defatted serum
+
+services:
+  BT: {name: Butter, fluid: butter}
+  MB: {name: Molten butter, fluid: molten butter}
+  GH: {name: Ghee, fluid: ghee}
+  SR: {name: Serum, fluid: serum}
+
+symbols:
+  butter_melter:
+    engineering_type: butter_melter
+    size: [72, 64]
+    ports:
+      inlet: {x: -36, y: -22, side: left}
+      outlet: {x: 22, y: 26, side: right}
+    graphics: |
+      <path class="sym" d="M-36,-32 L36,-32 L20,18 L-20,18 Z"/>
+      <rect class="sym" x="-12" y="18" width="24" height="12"/>
+      <path class="sym-thin" d="M-22,-16 L-14,-6 L-6,-16 L2,-6 L10,-16 L18,-6"/>
+  ghee_kettle:
+    same_as: jacketed_tank
+    engineering_type: ghee_boiler
+  prestrat_tank:
+    same_as: jacketed_tank
+    engineering_type: prestratification_tank
+  settling_tank:
+    same_as: vessel_tank
+    engineering_type: settling_tank
+  ghee_balance_tank:
+    same_as: vessel_tank
+    engineering_type: ghee_balance_tank
+  granulation_tank:
+    same_as: jacketed_tank
+    engineering_type: ghee_granulation_tank
+
+tag_prefixes:
+  butter_melter: M
+  ghee_kettle: K
+  prestrat_tank: T
+  settling_tank: T
+  ghee_balance_tank: T
+  granulation_tank: T
+
+instrumentation_rules:
+  - id: IR-GH-MELTER-TEMP
+    applies_to: {equipment_type: butter_melter}
+    attach: outlet_line
+    instruments:
+      - {function: TT, alarms: [TAH]}
+    loop: {controller: TIC, final_element: utility_valve, setpoint: "50 °C"}
+    rationale: Molten butter temperature is held by the hot-water valve.
+
+  - id: IR-GH-PRESTRAT
+    applies_to: {equipment_type: prestrat_tank}
+    attach: equipment
+    instruments:
+      - {function: TT, alarms: [TAH]}
+      - {function: LT, alarms: [LAH]}
+    loop: {controller: TIC, final_element: utility_valve, setpoint: "80 °C"}
+    rationale: Separation of serum needs a steady temperature; the level shows the batch.
+
+  - id: IR-GH-KETTLE-TEMP
+    applies_to: {equipment_type: ghee_kettle}
+    attach: equipment
+    instruments:
+      - {function: TT, alarms: [TAH]}
+    loop: {controller: TIC, final_element: utility_valve, setpoint: "115 °C"}
+    rationale: The end-point temperature decides moisture and flavour; the steam valve holds it.
+
+  - id: IR-GH-KETTLE-PRESSURE
+    applies_to: {equipment_type: ghee_kettle}
+    attach: equipment
+    instruments:
+      - {function: PI}
+      - {function: PSV}
+    rationale: Jacket steam pressure is shown and relieved (pressure part).
+
+  - id: IR-GH-SETTLING
+    applies_to: {equipment_type: settling_tank}
+    attach: equipment
+    instruments:
+      - {function: LT, alarms: [LAH]}
+      - {function: TT}
+    rationale: Inventory and the settling temperature (ghee must stay liquid).
+
+  - id: IR-GH-BALANCE
+    applies_to: {equipment_type: ghee_balance_tank}
+    attach: equipment
+    instruments:
+      - {function: LT, alarms: [LAL, LAH]}
+    rationale: Balance-tank level protects the transfer to storage.
+
+  - id: IR-GH-GRANULATION
+    applies_to: {equipment_type: granulation_tank}
+    attach: equipment
+    instruments:
+      - {function: TT, alarms: [TAH, TAL]}
+      - {function: LT, alarms: [LAH]}
+    loop: {controller: TIC, final_element: utility_valve, setpoint: "cooling profile for grain"}
+    rationale: Grain size depends on the cooling profile; the jacket valve follows it.
+
+line_rules:
+  - id: LR-GH-FILLER-INLET
+    applies_to: {to_type: [filler]}
+    type: on_off_valve
+    class: automated
+    position: 0.5
+    rationale: Automated inlet valve closes when the packing machine stops.

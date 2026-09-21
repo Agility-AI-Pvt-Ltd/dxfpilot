@@ -131,6 +131,20 @@ class ProcessStage(BaseModel):
     function: str = ""
     outlet_service: str | None = None
     optional: bool = False
+    # engineering module this stage belongs to (None for a classic single template)
+    module: str | None = None
+    # stages sharing a `branch` form their own chain beside the module's main chain, e.g. chemical
+    # dosing: drum → dosing pump. `feeds` joins the branch's last stage into that stage (its trains
+    # `feeds_trains`, 1-based; all when empty); `source` starts the branch from that stage's aux outlet.
+    branch: str | None = None
+    feeds: str | None = None
+    feeds_trains: list[int] = Field(default_factory=list)
+    source: str | None = None
+    source_service: str | None = None  # what the source's second outlet carries (default: the source's own service)
+    # an outlet terminal per consumer of this utility in the other modules (steam, hot water, ...)
+    utility_users: str | None = None
+    # module interface: this battery limit continues at that stage of another module
+    connects_to: str | None = None
 
 
 class ProcessDefinition(BaseModel):
@@ -138,6 +152,7 @@ class ProcessDefinition(BaseModel):
     name: str
     stages: list[ProcessStage]
     groups: dict[str, int]  # train group -> number of parallel units
+    group_labels: dict[str, list[str]] = Field(default_factory=dict)  # names of the trains, e.g. CIP tanks
     basis: dict[str, float | str] = Field(default_factory=dict)
     constraints: list[str] = Field(default_factory=list)
 

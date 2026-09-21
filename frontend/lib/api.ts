@@ -18,6 +18,130 @@ export type Project = {
   revisions: string[];
   current: string | null;
   chat: ChatMessage[];
+  table_overrides: TableOverride[];
+  intent: { engine?: Engine; scope_detection?: ScopeDetection | null };
+  /** Engineering modules this drawing is composed of; empty = the classic reception → pasteurization line */
+  modules: string[];
+};
+
+/** What the scope agent found in the workbooks: plant sections with the rows as evidence */
+export type ScopeFinding = {
+  id: string;
+  name: string;
+  status: "found" | "partial" | "not_found";
+  found_by: "rows" | "ai" | "none";
+  matched: number;
+  total: number;
+  evidence: { ref: string; text: string; capacity: string | null; qty: number | null; stage: string | null }[];
+  note: string;
+};
+export type ScopeDetection = { modules: ScopeFinding[]; selected: string[]; used_llm: boolean };
+
+export type EngineeringModule = {
+  id: string;
+  name: string;
+  area: string;
+  summary: string;
+  utility: string | null;
+  equipment: string[];
+  rules: number;
+};
+
+export type Engine = "rules" | "llm_planner";
+export const ENGINE_LABEL: Record<Engine, string> = { rules: "Rules engine (recommended)", llm_planner: "LLM planner (experimental)" };
+
+/** Design basis: every parameter, the value each workbook gives, and the approved value */
+export type BasisCandidate = { value: number; display: string; source: string; ref: string | null; text: string };
+export type BasisApproval = { value: number; source: string; ref: string | null; note: string; by: string; at?: string };
+export type BasisParameter = {
+  id: string;
+  name: string;
+  unit: string;
+  effect: string;
+  modules: string[];
+  candidates: BasisCandidate[];
+  status: "agreed" | "single_source" | "conflict" | "approved" | "missing";
+  value: number | null;
+  approval: BasisApproval | null;
+};
+export type DesignBasis = { parameters: BasisParameter[] };
+
+/** Generation stopped: design numbers the workbooks disagree on need a human decision first */
+export class BasisConflictError extends Error {
+  conflicts: BasisParameter[];
+  constructor(message: string, conflicts: BasisParameter[]) {
+    super(message);
+    this.conflicts = conflicts;
+  }
+}
+
+/** Derived from: the chain from a value on the drawing back to its source */
+export type TraceSource = { file: string; sheet: string; row: number | null; text: string };
+export type TraceStep = { label: string; value: string; detail: string; source: TraceSource | null };
+export type Trace = { tag: string; kind: string; title: string; steps: TraceStep[] };
+
+/** Mass balance → number of units (engine/selection.py): required ÷ unit capacity, rounded up */
+export type SizingRecord = {
+  stage: string;
+  stage_name: string;
+  basis: string;
+  required: string;
+  unit_capacity: string;
+  ratio: number;
+  working: number;
+  standby: number;
+  units: number;
+  design_data_qty: number | null;
+  source: string;
+  note: string;
+};
+
+export type PlannerAttempt = {
+  attempt: number;
+  plan: string;
+  changes?: string;
+  errors: string[];
+  warnings: number;
+  kept?: boolean;
+  patch_problems?: string[];
+};
+
+export type TableKind = "equipment_list" | "mass_balance";
+
+export type TableOverride = {
+  file: string;
+  sheet: string;
+  kind: TableKind;
+  header_row: number | null;
+  first_data_row: number | null;
+  columns: Record<string, string>;
+  capacity_unit: string | null;
+};
+
+export type SheetGrid = { file: string; sheet: string; role: SourceRole | null; columns: string[]; rows: string[][] };
+
+export type SourceRow = {
+  ref: string;
+  section: string;
+  description: string;
+  capacity_raw: string | null;
+  capacity: Quantity | null;
+  qty: number | null;
+  qty_raw: string | null;
+  uom: string | null;
+  note: string;
+  flags: string[];
+  read_by: "rules" | "llm";
+};
+
+export type MappingPreview = {
+  total: number;
+  with_quantity?: number;
+  with_capacity?: number;
+  flagged?: number;
+  intake_litres?: number | null;
+  rows: Record<string, unknown>[];
+  warnings: string[];
 };
 
 export type SourceRole = "mass_balance" | "design_data";
@@ -29,7 +153,20 @@ export type SourceSummary = {
   design_criteria: string[];
   plant_title: string;
   tables: string[];
+  detections: TableDetection[];
+  flagged_rows: SourceRow[];
+  ai_read_rows: SourceRow[];
   warnings: string[];
+};
+
+export type TableDetection = {
+  file: string;
+  sheet: string;
+  kind: "equipment_list" | "mass_balance" | "design_criteria";
+  method: "headers" | "llm" | "content" | "manual";
+  header_row: number | null;
+  columns: Record<string, string>;
+  rows: number;
 };
 
 /** What is still missing before a draft can be generated (empty = ready). */
@@ -147,7 +284,14 @@ export type Revision = {
     lines: Line[];
     instruments: Instrument[];
     loops: Loop[];
-    metadata: { decisions?: { agent: string; summary: string; detail: string }[]; assumptions?: string[]; warnings?: string[] };
+    metadata: {
+      decisions?: { agent: string; summary: string; detail: string }[];
+      assumptions?: string[];
+      warnings?: string[];
+      engine?: Engine;
+      planner?: { attempts: number; max_attempts: number; history: PlannerAttempt[]; best_attempt?: number; stop_reason?: string };
+      sizing?: SizingRecord[];
+    };
   };
   validation: { issues: Issue[]; checks_run: Record<string, number>; summary: { passed: boolean; errors: number; warnings: number } };
   events: ProgressEvent[];
@@ -172,8 +316,19 @@ async function json<T>(res: Response): Promise<T> {
 
 export const api = {
   health: () => fetch(`${API}/api/health`).then(json<{ ok: boolean; llm: boolean; model: string | null }>),
+  modules: () => fetch(`${API}/api/modules`).then(json<EngineeringModule[]>),
   projects: () => fetch(`${API}/api/projects`).then(json<ProjectListItem[]>),
   project: (id: string) => fetch(`${API}/api/projects/${id}`).then(json<Project>),
+  basis: (id: string) => fetch(`${API}/api/projects/${id}/basis`).then(json<DesignBasis>),
+  approveBasis: (id: string, approvals: Record<string, BasisApproval>) =>
+    fetch(`${API}/api/projects/${id}/basis`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ approvals }),
+    }).then(json<DesignBasis>),
+  trace: (id: string, rev: string, tag: string) =>
+    fetch(`${API}/api/projects/${id}/revisions/${rev}/trace/${encodeURIComponent(tag)}`).then(json<Trace>),
+  detectScope: (id: string) => fetch(`${API}/api/projects/${id}/scope`, { method: "POST" }).then(json<ScopeDetection>),
   create: (name: string, demo_data: boolean) =>
     fetch(`${API}/api/projects`, {
       method: "POST",
@@ -185,6 +340,21 @@ export const api = {
     for (const [role, f] of Object.entries(files)) if (f) fd.append(role, f);
     return fetch(`${API}/api/projects/${id}/sources`, { method: "POST", body: fd }).then(json<Project>);
   },
+  sheets: (id: string) => fetch(`${API}/api/projects/${id}/sources/sheets`).then(json<SheetGrid[]>),
+  previewMapping: (id: string, ov: TableOverride) =>
+    fetch(`${API}/api/projects/${id}/sources/mapping/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(ov),
+    }).then(json<MappingPreview>),
+  setMapping: (id: string, ov: TableOverride) =>
+    fetch(`${API}/api/projects/${id}/sources/mapping`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(ov),
+    }).then(json<Project>),
+  clearMapping: (id: string, kind: TableKind) =>
+    fetch(`${API}/api/projects/${id}/sources/mapping/${kind}`, { method: "DELETE" }).then(json<Project>),
   llmCalls: (id: string) => fetch(`${API}/api/projects/${id}/llm-calls`).then(json<LLMCall[]>),
   revisions: (id: string) => fetch(`${API}/api/projects/${id}/revisions`).then(json<RevisionSummary[]>),
   revision: (id: string, rev: string) => fetch(`${API}/api/projects/${id}/revisions/${rev}`).then(json<Revision>),
@@ -208,6 +378,10 @@ export async function streamPost(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+  if (res.status === 409) {
+    const data = await res.json();
+    throw new BasisConflictError(data.detail, data.conflicts ?? []);
+  }
   if (!res.ok || !res.body) throw new Error(`Request failed (${res.status})`);
   const reader = res.body.getReader();
   const decoder = new TextDecoder();

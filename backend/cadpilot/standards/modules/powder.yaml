@@ -1,0 +1,241 @@
+# Engineering module 12 — Skim milk powder (SMP) plant
+# Skim milk (surplus SNF) → skim milk storage tanks (SMST) → feed pump → preheater → falling-film
+# evaporator (TVR) → concentrate balance tank → high-pressure pump → spray dryer → fluid bed →
+# powder packing. Cost estimates usually list the plant as one package ("30 MTPD Powder Plant"):
+# every item drawn here is traced to that package row, with typical capacities marked as assumptions.
+
+id: powder
+name: Powder plant (SMP)
+order: 12
+area: "12"
+area_name: Skim milk powder plant
+# Excel section headings where this module's equipment is listed (rows there are preferred)
+sections: [smst, evaporator, dryer, powder plant]
+keywords: [powder, smp, spray dryer, evaporator, skim milk powder]
+# mass-balance products this section makes (the coverage check matches them)
+products: [smp, powder, snf]
+summary: Skim milk → evaporation → spray drying → packing
+
+groups:
+  pw_in: {default_count: 1}
+  pw_smst: {default_count: 2}
+  pw_evap: {flow_stage: pw_feed_pump, default_count: 1}
+  pw_dry: {flow_stage: pw_hp_pump, default_count: 1}
+
+
+sizing:
+  - {stage: pw_smst, basis: products, products: [snf], factor: 11, storage_days: 0.5}   # ~11 L skim milk per kg SNF
+  - {stage: pw_evaporator, basis: products, products: [snf], factor: 11, hours: 20}
+  - {stage: pw_dryer, basis: products, products: [snf], factor: 1.04, unit: t/day}      # ~1.04 kg SMP per kg SNF
+
+stages:
+  - id: pw_skim_in
+    name: Skim milk for powder
+    kind: terminal_in
+    group: pw_in
+    label: SKIM MILK / SURPLUS SNF FROM PROCESSING
+    outlet_service: SM
+    function: Battery limit — skim milk for conversion to SMP
+
+  - id: pw_smst
+    name: Skim milk storage tank (SMST)
+    kind: equipment
+    equipment_type: silo
+    group: pw_smst
+    package: [powder plant]
+    default_capacity: {value: 150, unit: KL}
+    function: Store the day's skim milk for the evaporator
+
+  - id: pw_feed_pump
+    name: Evaporator feed pump
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: pw_evap
+    package: [powder plant]
+    default_capacity: {value: 16, unit: KLPH}
+    attributes: {drive: VFD}
+    function: Feed skim milk to the evaporator
+
+  - id: pw_preheater
+    name: Evaporator preheater
+    kind: equipment
+    equipment_type: heater_phe
+    group: pw_evap
+    package: [powder plant]
+    default_capacity: {value: 16, unit: KLPH}
+    attributes: {utility: steam, duty: "→ 75 °C"}
+    function: Preheat and pasteurize the feed
+
+  - id: pw_evaporator
+    name: Falling-film evaporator (TVR)
+    kind: equipment
+    equipment_type: evaporator
+    group: pw_evap
+    package: [powder plant]
+    default_capacity: {value: 16, unit: KLPH}
+    attributes: {utility: steam, duty: "9 % → 45–48 % TS"}
+    outlet_service: CC
+    function: Concentrate skim milk to 45–48 % total solids
+
+  - id: pw_conc_tank
+    name: Concentrate balance tank
+    kind: equipment
+    equipment_type: concentrate_tank
+    group: pw_dry
+    package: [powder plant]
+    default_capacity: {value: 5, unit: KL}
+    function: Buffer between evaporator and dryer
+
+  - id: pw_hp_pump
+    name: High-pressure feed pump
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: pw_dry
+    package: [powder plant]
+    default_capacity: {value: 3, unit: KLPH}
+    attributes: {drive: VFD, pump_type: high-pressure plunger}
+    function: Atomize the concentrate in the dryer
+
+  - id: pw_dryer
+    name: Spray dryer
+    kind: equipment
+    equipment_type: spray_dryer
+    group: pw_dry
+    package: [powder plant]
+    default_capacity: {value: 30, unit: t/day}
+    attributes: {utility: steam}
+    outlet_service: PWD
+    function: Dry the concentrate to powder
+
+  - id: pw_fluid_bed
+    name: Vibro fluid bed (after-dryer / cooler)
+    kind: equipment
+    equipment_type: fluid_bed
+    group: pw_dry
+    package: [powder plant]
+    function: Final drying and cooling of the powder
+
+  - id: pw_packer
+    name: Powder packing machine (25 kg bags)
+    kind: equipment
+    equipment_type: powder_packer
+    group: pw_dry
+    package: [powder plant]
+    function: Pack SMP in 25 kg bags
+
+  - id: pw_out
+    name: SMP bags out
+    kind: terminal_out
+    group: pw_dry
+    label: SMP BAGS (25 KG) TO POWDER STORE
+    function: Battery limit — bagged SMP to the powder store
+
+services:
+  SM: {name: Skim milk, fluid: skim milk}
+  CC: {name: Concentrate, fluid: skim milk concentrate}
+  PWD: {name: Powder, fluid: skim milk powder}
+
+symbols:
+  concentrate_tank:
+    same_as: vessel_tank
+    engineering_type: concentrate_balance_tank
+  evaporator:
+    engineering_type: falling_film_evaporator
+    size: [70, 150]
+    ports:
+      inlet: {x: -35, y: -60, side: left}
+      outlet: {x: 35, y: 60, side: right}
+    graphics: |
+      <rect class="sym" x="-35" y="-75" width="30" height="150" rx="4"/>
+      <path class="sym-thin" d="M-28,-60 L-28,60 M-20,-60 L-20,60 M-12,-60 L-12,60"/>
+      <path class="sym" d="M5,-40 L35,-40 L35,40 L20,60 L5,40 Z"/>
+      <path class="sym-thin" d="M-5,50 L5,50"/>
+  spray_dryer:
+    engineering_type: spray_dryer
+    size: [90, 150]
+    ports:
+      inlet: {x: -45, y: -60, side: left}
+      outlet: {x: 45, y: 60, side: right}
+    graphics: |
+      <path class="sym" d="M-45,-75 L45,-75 L45,20 L8,70 L-8,70 L-45,20 Z"/>
+      <path class="sym-thin" d="M-10,-75 L-10,-55 L10,-55 L10,-75 M0,-55 L0,-40 M-8,-40 L8,-40"/>
+  fluid_bed:
+    engineering_type: vibro_fluid_bed
+    size: [100, 40]
+    ports:
+      inlet: {x: -50, y: -10, side: left}
+      outlet: {x: 50, y: 10, side: right}
+    graphics: |
+      <rect class="sym" x="-50" y="-20" width="100" height="40"/>
+      <path class="sym-thin" d="M-46,6 L46,6" stroke-dasharray="4 3"/>
+      <path class="sym-thin" d="M-30,20 L-30,28 M0,20 L0,28 M30,20 L30,28"/>
+  powder_packer:
+    engineering_type: powder_bagging_machine
+    size: [70, 60]
+    ports:
+      inlet: {x: -35, y: -20, side: left}
+      outlet: {x: 35, y: 20, side: right}
+    graphics: |
+      <path class="sym" d="M-25,-30 L25,-30 L10,-5 L-10,-5 Z"/>
+      <rect class="sym" x="-35" y="-5" width="70" height="35"/>
+      <path class="sym-thin" d="M-15,30 L-15,10 L15,10 L15,30"/>
+
+tag_prefixes:
+  concentrate_tank: T
+  evaporator: EV
+  spray_dryer: D
+  fluid_bed: D
+  powder_packer: PK
+
+instrumentation_rules:
+  - id: IR-PW-EVAP-PRESSURE
+    applies_to: {equipment_type: evaporator}
+    attach: equipment
+    instruments:
+      - {function: PT, alarms: [PAH]}
+    loop: {controller: PIC, final_element: utility_valve, setpoint: "motive steam pressure"}
+    rationale: The TVR's motive-steam pressure sets the evaporation rate.
+
+  - id: IR-PW-EVAP-SOLIDS
+    applies_to: {equipment_type: evaporator}
+    attach: outlet_line
+    instruments:
+      - {function: DT, alarms: [DAL, DAH]}
+    rationale: Concentrate density (total solids) must be in range before drying.
+
+  - id: IR-PW-CONC-LEVEL
+    applies_to: {equipment_type: concentrate_tank}
+    attach: equipment
+    instruments:
+      - {function: LT, alarms: [LAL, LAH]}
+    rationale: The high-pressure pump must never run dry.
+
+  - id: IR-PW-DRYER-INLET
+    applies_to: {equipment_type: spray_dryer}
+    attach: equipment
+    instruments:
+      - {function: TT, alarms: [TAH]}
+    loop: {controller: TIC, final_element: utility_valve, setpoint: "inlet air 190 °C"}
+    rationale: Inlet air temperature is held by the air-heater steam valve.
+
+  - id: IR-PW-DRYER-OUTLET
+    applies_to: {equipment_type: spray_dryer}
+    attach: outlet_line
+    instruments:
+      - {function: TT, alarms: [TAH, TAL]}
+    loop: {controller: TIC, final_element: upstream_pump_vfd, setpoint: "outlet air 85–90 °C"}
+    rationale: Outlet temperature (powder moisture) is held by the feed rate of the high-pressure pump.
+
+  - id: IR-PW-DRYER-SAFETY
+    applies_to: {equipment_type: spray_dryer}
+    attach: equipment
+    instruments:
+      - {function: PSE}
+    rationale: Explosion vent on the drying chamber (combustible dust).
+
+  - id: IR-PW-FLUID-BED
+    applies_to: {equipment_type: fluid_bed}
+    attach: equipment
+    instruments:
+      - {function: TT, alarms: [TAH]}
+    rationale: Powder outlet temperature for storage.

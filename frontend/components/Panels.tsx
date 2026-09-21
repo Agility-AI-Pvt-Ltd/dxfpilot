@@ -183,6 +183,91 @@ export function DecisionsPanel({ rev, projectId }: { rev: Revision; projectId: s
     <div className="pane">
       <h2>Agent decisions</h2>
       <p className="sub">What the primary agent decided, and what the workers assumed where the data was silent.</p>
+      <p className="section-title">Engine</p>
+      <p style={{ margin: "0 0 12px" }}>
+        {md.engine === "llm_planner" ? "LLM planner (experimental) — plan validated deterministically" : "Rules engine"}
+      </p>
+      {!!md.sizing?.length && (
+        <>
+          <p className="section-title">Equipment sizing — mass balance ÷ unit capacity (calculated, not chosen by the AI)</p>
+          <table className="grid" style={{ marginBottom: 20 }}>
+            <thead>
+              <tr><th>Stage</th><th>Required</th><th>Unit capacity</th><th>Units</th><th>Design data</th></tr>
+            </thead>
+            <tbody>
+              {md.sizing.map((r) => (
+                <tr key={r.stage}>
+                  <td>
+                    {r.stage_name}
+                    <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{r.basis}</div>
+                  </td>
+                  <td className="mono" style={{ fontSize: 12.5 }}>{r.required}</td>
+                  <td style={{ fontSize: 12.5 }}>
+                    {r.unit_capacity}
+                    <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{r.source}</div>
+                  </td>
+                  <td style={{ fontSize: 12.5 }}>
+                    {r.units ? (
+                      <>
+                        <b>{r.units}</b>
+                        <div style={{ fontSize: 11.5, color: "var(--muted)" }}>
+                          ⌈{r.ratio}⌉ = {r.working}{r.standby ? ` + ${r.standby} standby` : ""}{r.note ? ` · ${r.note}` : ""}
+                        </div>
+                      </>
+                    ) : (
+                      <span style={{ fontSize: 11.5, color: "var(--muted)" }}>{r.note}</span>
+                    )}
+                  </td>
+                  <td style={{ fontSize: 12.5 }}>
+                    {r.design_data_qty ?? "—"}
+                    {r.units > 0 && r.design_data_qty != null && r.design_data_qty !== r.units && (
+                      <div className="sev warning" style={{ textTransform: "none" }}>differs</div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+      {md.planner && (
+        <>
+          <p className="section-title">LLM planner attempts ({md.planner.attempts} of max {md.planner.max_attempts})</p>
+          {md.planner.stop_reason && (
+            <p style={{ margin: "0 0 8px", fontSize: 13 }}>
+              Stopped: {md.planner.stop_reason}
+              {md.planner.best_attempt ? ` — this drawing is attempt ${md.planner.best_attempt}, the one with the fewest errors.` : ""}
+            </p>
+          )}
+          <table className="grid" style={{ marginBottom: 20 }}>
+            <thead><tr><th>Attempt</th><th>Plan</th><th>Validation</th></tr></thead>
+            <tbody>
+              {md.planner.history.map((h) => (
+                <tr key={h.attempt} style={h.kept === false ? { opacity: 0.6 } : undefined}>
+                  <td>
+                    {h.attempt}
+                    {h.attempt === md.planner!.best_attempt && <div><span className="badge ok">used</span></div>}
+                    {h.kept === false && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>discarded (worse)</div>}
+                  </td>
+                  <td style={{ fontSize: 12.5 }}>
+                    {h.plan}
+                    {h.changes && h.attempt > 1 && <div style={{ color: "var(--muted)" }}>patch: {h.changes}</div>}
+                    {h.patch_problems?.map((x, k) => <div key={k} className="sev warning" style={{ textTransform: "none" }}>{x}</div>)}
+                  </td>
+                  <td style={{ fontSize: 12.5 }}>
+                    {h.errors.length === 0 ? <span className="sev info">passed</span> : (
+                      <details>
+                        <summary className="sev error" style={{ cursor: "pointer" }}>{h.errors.length} error(s)</summary>
+                        {h.errors.map((e, k) => <div key={k}>{e}</div>)}
+                      </details>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
       <p className="section-title">LLM calls (audit log, newest first)</p>
       <LLMCallsTable projectId={projectId} refreshKey={rev.revision} />
       <p className="section-title">Run log</p>

@@ -7,7 +7,9 @@ from pydantic import BaseModel, Field
 from ..model.engineering import ProcessDefinition, ProcessStage, Quantity, Stream
 from ..model.proposals import ProcessProposal
 from .context import AgentContext
-from .llm import get_llm
+from langsmith import traceable
+
+from .llm import get_llm, mark_source
 
 AGENT = "process_agent"
 
@@ -30,6 +32,7 @@ def ordered_stage_ids(template: dict, order_override: list[str] | None) -> list[
     return known + [s for s in ids if s not in known]
 
 
+@traceable(name="process_agent", run_type="chain", process_inputs=lambda d: d["ctx"].trace_summary())
 def run(ctx: AgentContext) -> ProcessProposal:
     tpl = ctx.template
     intent = ctx.intent
@@ -39,6 +42,10 @@ def run(ctx: AgentContext) -> ProcessProposal:
     used_llm = False
 
     optional = {s["id"]: s for s in tpl["stages"] if s.get("optional")}
+    # an optional stage whose equipment is in the design data is part of the plant
+    from .equipment import keyword_matches
+
+    evidence = {sid: rows[0] for sid, st in optional.items() if (rows := keyword_matches(st, ctx.source.equipment_rows))}
     llm = get_llm()
     if llm.enabled and intent.request:
         plan = llm.structured(
@@ -50,7 +57,13 @@ def run(ctx: AgentContext) -> ProcessProposal:
             prompt=(
                 f"Process template: {tpl['name']}\n"
                 f"Stages (id: name, optional?):\n"
-                + "\n".join(f"- {s['id']}: {s['name']}{' (optional)' if s.get('optional') else ''}" for s in tpl["stages"])
+                + "\n".join(
+                    f"- {s['id']}: {s['name']}{' (optional)' if s.get('optional') else ''}"
+                    + (f" — IN THE DESIGN DATA: {evidence[s['id']].ref.split('!')[-1]} '{evidence[s['id']].description.splitlines()[0][:60]}'"
+                       if s["id"] in evidence else "")
+                    for s in tpl["stages"])
+                + "\n\nAn optional stage whose equipment is in the design data stays, unless the user explicitly asks "
+                  "to leave it out. Do not exclude a stage just because the request does not mention it."
                 + f"\n\nDesign criteria from the client data:\n" + "\n".join(ctx.source.design_criteria[:20])
                 + f"\n\nUser requirements:\n{intent.request}"
             ),
@@ -64,6 +77,15 @@ def run(ctx: AgentContext) -> ProcessProposal:
             constraints += plan.constraints
             assumptions += plan.assumptions
 
+    # guard: the model may not drop a stage the design data proves, unless the request says so
+    text = (intent.request or "").lower()
+    for sid in sorted(excluded & set(evidence)):
+        words = [w for w in optional[sid]["name"].lower().split() if len(w) > 3][:2]
+        asked = any(k in text for k in ("without", "remove", "exclude", "drop", "no ")) and any(w in text for w in words)
+        if sid not in intent.disabled_stages and not asked:
+            excluded.discard(sid)
+            assumptions.append(f"Kept '{optional[sid]['name']}': the design data lists it "
+                               f"({evidence[sid].ref.split('!')[-1]} {evidence[sid].description.splitlines()[0][:50]})")
     excluded -= set(intent.enabled_stages)
     excluded &= set(optional)  # only optional stages may be dropped
     stages_by_id = {s["id"]: s for s in tpl["stages"]}
@@ -78,6 +100,14 @@ def run(ctx: AgentContext) -> ProcessProposal:
             function=stages_by_id[sid].get("function", ""),
             outlet_service=stages_by_id[sid].get("outlet_service"),
             optional=bool(stages_by_id[sid].get("optional")),
+            module=stages_by_id[sid].get("module"),
+            branch=stages_by_id[sid].get("branch"),
+            feeds=stages_by_id[sid].get("feeds"),
+            feeds_trains=list(stages_by_id[sid].get("feeds_trains", [])),
+            source=stages_by_id[sid].get("source"),
+            source_service=stages_by_id[sid].get("source_service"),
+            utility_users=stages_by_id[sid].get("utility_users"),
+            connects_to=stages_by_id[sid].get("connects_to"),
         )
         for sid in ordered_stage_ids(tpl, intent.stage_order)
         if sid not in excluded
@@ -85,12 +115,22 @@ def run(ctx: AgentContext) -> ProcessProposal:
     for sid in sorted(excluded):
         assumptions.append(f"Optional stage '{stages_by_id[sid]['name']}' excluded")
 
-    # Keep terminals at the ends whatever order corrections requested
-    stages = [s for s in stages if s.kind == "terminal_in"] + [s for s in stages if s.kind == "equipment"] + [
-        s for s in stages if s.kind == "terminal_out"
+    # Keep terminals at the ends of every chain whatever order corrections requested
+    # (each module's main chain first, then its side branches, in template order)
+    chains: dict[tuple[str | None, str | None], list[ProcessStage]] = {}
+    for st in stages:
+        chains.setdefault((st.module, st.branch), []).append(st)
+    stages = [
+        s
+        for chain in chains.values()
+        for s in [x for x in chain if x.kind == "terminal_in"] + [x for x in chain if x.kind == "equipment"]
+        + [x for x in chain if x.kind == "terminal_out"]
     ]
 
-    groups = {g: int(v.get("default_count", 1)) for g, v in tpl["groups"].items()}
+    groups = {g: int(v.get("default_count", len(v.get("train_labels", [])) or 1)) for g, v in tpl["groups"].items()}
+    from .equipment import group_labels as labels_of
+
+    group_labels = {g: labels for g, v in tpl["groups"].items() if (labels := labels_of(v, ctx.source))}
     basis: dict[str, float | str] = {}
     intake = ctx.source.daily_intake_litres()
     raw = ctx.source.mass_balance_inputs[0] if ctx.source.mass_balance_inputs else None
@@ -122,12 +162,14 @@ def run(ctx: AgentContext) -> ProcessProposal:
             )
         )
 
+    mark_source("llm" if used_llm else ("rules (fallback: model reply unusable)" if llm.enabled and intent.request else "rules"))
     return ProcessProposal(
         process=ProcessDefinition(
             template=intent.template,
             name=tpl["name"],
             stages=stages,
             groups=groups,
+            group_labels=group_labels,
             basis=basis,
             constraints=constraints,
         ),

@@ -1,0 +1,159 @@
+# Engineering module 3 — CIP station (clean-in-place)
+# CIP return → tank selection (lye / acid / hot water / recovered water) → CIP forward pump →
+# CIP heater (steam) → CIP supply to the circuits. Chemical dosing: drum → dosing tank → dosing pump →
+# lye and acid tanks.
+
+id: cip
+name: CIP station
+order: 3
+area: "3"
+area_name: CIP station
+# Excel section headings where this module's equipment is listed (rows there are preferred)
+sections: [cip]
+keywords: [cip, clean-in-place, clean in place, cleaning]
+summary: CIP tanks → pumps → chemical dosing → return
+
+groups:
+  cip_ret: {default_count: 1}
+  cip_tanks: {train_labels: [Lye, Acid, Hot water, Recovered water]}
+  cip_fwd: {lead_stage: cip_forward_pump, flow_stage: cip_forward_pump, default_count: 2}
+  cip_dose: {train_labels: [Lye, Acid]}
+
+stages:
+  - id: cip_return
+    name: CIP return from circuits
+    kind: terminal_in
+    group: cip_ret
+    label: CIP RETURN FROM CIRCUITS
+    outlet_service: CR
+    function: Battery limit — CIP return from the cleaned circuits (return pumps sit at each circuit)
+
+  - id: cip_tank
+    name: CIP tank
+    kind: equipment
+    equipment_type: cip_tank
+    group: cip_tanks
+    match: [hot water tank]
+    default_capacity: {value: 10, unit: KL}
+    function: Hold lye, acid, hot water and recovered final-rinse water
+
+  - id: cip_forward_pump
+    name: CIP forward (supply) pump
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: cip_fwd
+    match: [cip forward pump]
+    default_capacity: {value: 30, unit: KLPH}
+    attributes: {drive: VFD}
+    outlet_service: CS
+    function: Deliver cleaning solution to the circuit at the required flow
+
+  - id: cip_heater
+    name: CIP supply heater
+    kind: equipment
+    equipment_type: heater_phe
+    group: cip_fwd
+    default_capacity: {value: 40, unit: KLPH}
+    attributes: {utility: steam, duty: "→ 75–85 °C"}
+    function: Heat the cleaning solution to the programme temperature
+
+  - id: cip_supply
+    name: CIP supply to circuits
+    kind: terminal_out
+    group: cip_fwd
+    label: CIP SUPPLY TO CIRCUIT
+    function: Battery limit — CIP supply to the circuit (tanker, silos, pasteurizer, ...)
+
+  # ---- chemical dosing branch -------------------------------------------------------------------
+  - id: cip_chemical_in
+    name: Chemical from drum
+    kind: terminal_in
+    group: cip_dose
+    branch: dosing
+    label: CONCENTRATED CHEMICAL FROM DRUM
+    outlet_service: CHM
+    function: Battery limit — concentrated lye / acid from the chemical store
+
+  - id: cip_dosing_tank
+    name: Chemical dosing tank
+    kind: equipment
+    equipment_type: dosing_tank
+    group: cip_dose
+    branch: dosing
+    match: [dosing tanks, acid, lye]
+    default_capacity: {value: 1, unit: KL}
+    function: Day tank of concentrated chemical
+
+  - id: cip_dosing_pump
+    name: Chemical dosing pump
+    kind: equipment
+    equipment_type: dosing_pump
+    group: cip_dose
+    branch: dosing
+    match: [dosing pumps]
+    default_capacity: {value: 1.5, unit: KLPH}
+    feeds: cip_tank
+    feeds_trains: [1, 2]
+    function: Dose concentrate into the lye and acid tanks to hold strength
+
+services:
+  CR: {name: CIP return, fluid: cleaning solution}
+  CS: {name: CIP supply, fluid: cleaning solution}
+  CHM: {name: Concentrated chemical, fluid: lye / acid}
+
+symbols:
+  cip_tank:
+    same_as: vessel_tank
+    engineering_type: cip_tank
+  dosing_tank:
+    same_as: vessel_tank
+    engineering_type: chemical_day_tank
+
+tag_prefixes:
+  cip_tank: T
+  dosing_tank: T
+
+instrumentation_rules:
+  - id: IR-CIP-TANK-LEVEL
+    applies_to: {equipment_type: cip_tank}
+    attach: equipment
+    instruments:
+      - {function: LT, alarms: [LAL, LAH]}
+    rationale: Tank level interlocks the forward pump (dry-run) and the make-up / return valves (overflow).
+
+  - id: IR-CIP-TANK-TEMP
+    applies_to: {equipment_type: cip_tank}
+    attach: equipment
+    instruments:
+      - {function: TT, alarms: [TAL]}
+    rationale: Solution temperature is checked before a CIP step is released.
+
+  - id: IR-CIP-SUPPLY-CONDUCTIVITY
+    applies_to: {stage: cip_heater}
+    attach: outlet_line
+    instruments:
+      - {function: AT, alarms: [AAL]}
+    rationale: Supply conductivity proves chemical strength during the lye and acid steps.
+
+  - id: IR-CIP-SUPPLY-FLOW
+    applies_to: {stage: cip_forward_pump}
+    attach: outlet_line
+    instruments:
+      - {function: FT, inline: flow_element}
+    loop: {controller: FIC, final_element: self_vfd, setpoint: "circuit flow (≥ 1.5 m/s)"}
+    rationale: A minimum flow (turbulence) in the circuit is what actually cleans; the pump speed holds it.
+
+  - id: IR-CIP-DOSING-TANK-LEVEL
+    applies_to: {equipment_type: dosing_tank}
+    attach: equipment
+    instruments:
+      - {function: LSL}
+    rationale: Low level stops the dosing pump and asks for a new drum.
+
+line_rules:
+  - id: LR-CIP-DOSING-NRV
+    applies_to: {from_type: [dosing_pump]}
+    type: check_valve
+    class: manual
+    position: 0.3
+    rationale: Non-return valve so hot solution cannot flow back into the dosing pump.

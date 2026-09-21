@@ -1,0 +1,134 @@
+# Engineering module 2 — Milk pasteurization (HTST)
+# Raw milk → balance tank → feed pump → pasteurizer (regeneration + heating) → holding tube →
+# cooling section → pasteurized milk storage. Under-temperature milk is diverted after the holding tube.
+
+id: pasteurization
+name: Milk pasteurization
+order: 2
+area: "2"
+area_name: Milk pasteurization
+# Excel section headings where this module's equipment is listed (rows there are preferred)
+sections: [processing]
+keywords: [pasteuri, htst, balance tank, holding tube, pasteurised milk, pasteurized milk]
+# mass-balance products this section makes (the coverage check matches them)
+products: []
+summary: Balance tank → pasteurizer → holding → cooling
+
+groups:
+  pz_in: {default_count: 1}
+  pz_lines: {lead_stage: pz_pasteurizer, flow_stage: pz_feed_pump, default_count: 2}
+
+
+sizing:
+  - {stage: pz_pasteurizer, basis: intake, hours: 20, unit_basis: processing_line_klph}         # the day's milk processed in 20 h (4 h CIP)
+
+stages:
+  - id: pz_raw_milk_in
+    name: Raw milk from storage
+    kind: terminal_in
+    group: pz_in
+    label: RAW MILK FROM RMST
+    outlet_service: RM
+    function: Battery limit — raw milk from the raw milk silos
+
+  - id: pz_balance_tank
+    name: Pasteurizer balance tank
+    kind: equipment
+    equipment_type: balance_tank
+    group: pz_lines
+    match: [balance tank, pasteurizer]
+    default_capacity: {value: 300, unit: L}
+    function: Constant head for the feed pump; float/level-controlled inlet
+
+  - id: pz_feed_pump
+    name: Pasteurizer feed pump
+    kind: equipment
+    equipment_type: centrifugal_pump
+    group: pz_lines
+    match: [raw milk transfer pump]
+    default_capacity: {value: 20, unit: KLPH}
+    attributes: {drive: VFD}
+    function: Feed the pasteurizer at constant flow
+
+  - id: pz_pasteurizer
+    name: Milk pasteurizer (HTST PHE, regeneration + heating)
+    kind: equipment
+    equipment_type: pasteurizer
+    group: pz_lines
+    match: [milk pasteurizer]
+    default_capacity: {value: 20, unit: KLPH}
+    attributes: {utility: hot water, holding: "72 °C / 15 s"}
+    function: Regenerative pre-heating and heating to pasteurization temperature
+
+  - id: pz_holding_tube
+    name: Holding tube
+    kind: equipment
+    equipment_type: holding_tube
+    group: pz_lines
+    outlet_service: PM
+    default_capacity: {value: 20, unit: KLPH}
+    attributes: {holding: "15 s at 72 °C"}
+    function: Hold the milk at pasteurization temperature for the required time
+
+  - id: pz_cooler
+    name: Pasteurizer cooling section
+    kind: equipment
+    equipment_type: plate_heat_exchanger
+    group: pz_lines
+    default_capacity: {value: 20, unit: KLPH}
+    attributes: {duty: "→ 4 °C", utility: chilled water}
+    function: Cool pasteurized milk to storage temperature
+
+  - id: pz_pm_out
+    name: To pasteurized milk storage
+    kind: terminal_out
+    group: pz_lines
+    label: TO PASTEURIZED MILK STORAGE (PMST)
+    function: Battery limit — pasteurized milk to PMST
+
+services:
+  RM: {name: Raw milk, fluid: raw milk}
+  PM: {name: Pasteurized milk, fluid: pasteurized milk}
+
+symbols:
+  balance_tank:
+    same_as: vessel_tank
+    engineering_type: balance_tank
+  holding_tube:
+    engineering_type: holding_tube
+    size: [72, 40]
+    ports:
+      inlet: {x: -36, y: -12, side: left}
+      outlet: {x: 36, y: 12, side: right}
+    graphics: |
+      <path class="sym" d="M-36,-12 L26,-12 Q36,-12 36,-4 Q36,4 26,4 L-26,4 Q-36,4 -36,12 L36,12"/>
+
+tag_prefixes:
+  balance_tank: T
+  holding_tube: HT
+
+instrumentation_rules:
+  - id: IR-PZ-BALANCE-LEVEL
+    applies_to: {equipment_type: balance_tank}
+    attach: equipment
+    instruments:
+      - {function: LT, alarms: [LAL, LALL]}
+    loop: {controller: LIC, final_element: inlet_control_valve, setpoint: "60 %"}
+    rationale: Balance-tank level is held by the inlet valve so the feed pump never runs dry.
+
+  - id: IR-PZ-HOLDING-DIVERSION
+    applies_to: {equipment_type: holding_tube}
+    attach: outlet_line
+    instruments:
+      - {function: TT, alarms: [TAL]}
+      - {function: TSL}
+    loop: {controller: TSL, final_element: outlet_diversion_valve, kind: interlock, setpoint: "< 72 °C"}
+    rationale: Milk leaving the holding tube below 72 °C is diverted back to the balance tank (FDV interlock).
+
+line_rules:
+  - id: LR-PZ-BALANCE-INLET
+    applies_to: {to_type: [balance_tank]}
+    type: butterfly_valve
+    class: manual
+    position: 0.25
+    rationale: Isolation of the balance tank inlet for maintenance.
