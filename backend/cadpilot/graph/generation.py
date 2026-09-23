@@ -88,6 +88,10 @@ class GenerationState(TypedDict, total=False):
     ir_section_counts: dict[str, int]  # section -> errors in the latest attempt
     ir_patch_problems_by: dict[str, list[str]]  # section -> removals of its last patch that matched nothing
     ir_final: str  # set when the best version of every section is compiled once more before review
+    ir_repair: dict  # the rule items the closer completed after the planner stopped
+    ir_replanned: list[str]  # sections planned again from scratch on this attempt
+    ir_replans: dict  # section -> how many times it has been planned again
+    ir_last_replan: int  # attempt of the most recent fresh plan (it gets a few corrections before stopping)
     next_after_validate: str
 
     decisions: Annotated[list[Decision], operator.add]
@@ -102,6 +106,9 @@ def _ctx(state: GenerationState, standards: Standards) -> AgentContext:
         registry=state["registry"],
         feedback=state.get("feedback", []),
     )
+
+
+REPAIRED = "repair|"  # ir_final marker: the plan the closer completed, on its way back through compile_ir
 
 
 def _event(step: str, detail: str, **extra: Any) -> dict[str, Any]:
@@ -223,6 +230,11 @@ def build_generation_graph(standards: Standards | None = None):
         to_fix = [m for m in sections if best_sec[m]["errors"]]
         problems_by = state.get("ir_patch_problems_by", {}) if isinstance(state.get("ir_patch_problems_by"), dict) else {}
 
+        def replan(m: str, b: dict):
+            """A section stuck for several corrections: plan it again, told what it kept getting wrong."""
+            problems = planner_agent.format_feedback(b["errors"], b["col"], b["hints"], b["nodes"])
+            return job(m, lambda p, e, pre: planner_agent.plan(ctx, p, e, equipment, pre, attempt, b["plan"], problems))
+
         def correct(m: str):
             b = best_sec[m]
             rejected = None
@@ -235,14 +247,28 @@ def build_generation_graph(standards: Standards | None = None):
                 rejected, equipment, pre,
             ))
 
-        results = planner_agent.in_parallel({m: correct(m) for m in to_fix})
-        if to_fix and all(out is None for out in results.values()):  # keep what we have: the best plan goes to review
+        replans = dict(state.get("ir_replans", {}))
+        stuck = [m for m in to_fix if attempt - best_sec[m]["attempt"] >= planner_agent.SECTION_REPLAN_AFTER
+                 and replans.get(m, 0) < planner_agent.SECTION_REPLANS]
+        jobs = {m: (replan(m, best_sec[m]) if m in stuck else correct(m)) for m in to_fix}
+        results = planner_agent.in_parallel(jobs)
+        fresh = {m: results.pop(m) for m in list(results) if m in stuck}  # a fresh plan, not a patch
+        if to_fix and not fresh and all(out is None for out in results.values()):  # keep what we have: the best plan goes to review
             return {
                 "ir": None, "ir_attempt": attempt, **_restore_best(state, f"no usable correction from the model on attempt {attempt}"),
                 "events": [_event("llm_planner", f"Attempt {attempt}: no usable correction — keeping the best plan")],
             }
         current, changes, problems = {}, [], {}
+        replanned = set()
         for m in sections:
+            if m in stuck:
+                pl = fresh.get(m)
+                current[m] = pl if pl is not None else best_sec[m]["plan"]
+                if pl is not None:
+                    replanned.add(m)
+                    replans[m] = replans.get(m, 0) + 1
+                    changes.append(f"{m}: planned again from scratch ({planner_agent.summarize(pl)})")
+                continue
             out = results.get(m)
             if out is None:
                 current[m] = best_sec[m]["plan"]
@@ -254,7 +280,9 @@ def build_generation_graph(standards: Standards | None = None):
         label = (f"patched {len(to_fix)} of {len(sections)} sections" if len(sections) > 1
                  else f"patched attempt {base_attempts[0]}")
         return {
-            "ir": ir, "ir_sections": current, "ir_attempt": attempt, "ir_changes": "; ".join(changes) or "no changes",
+            "ir": ir, "ir_sections": current, "ir_attempt": attempt, "ir_replanned": sorted(replanned), "ir_replans": replans,
+            "ir_last_replan": attempt if replanned else state.get("ir_last_replan", 0),
+            "ir_changes": "; ".join(changes) or "no changes",
             "ir_patch_problems": [x for v in problems.values() for x in v], "ir_patch_problems_by": problems,
             "events": [_event("llm_planner", f"Attempt {attempt}: LLM {label} ({'; '.join(changes) or 'no changes'})", llm=True)],
         }
@@ -322,6 +350,8 @@ def build_generation_graph(standards: Standards | None = None):
         col, nodes = state.get("connection_of_line", {}), state.get("node_of_tag", {})
         hints = {n: h for n, i in enumerate(errors) if (h := planner_agent.expected_location(i, state["merged_model"], ctx, col, nodes))}
 
+        if str(state.get("ir_final", "")).startswith(REPAIRED):  # the closer's result, compiled once more
+            return _finish_repaired(state, report, errors, warnings)
         if state.get("ir_final"):  # the best version of every section, compiled once more for review
             return _finish_combined(state, report, errors, warnings)
 
@@ -387,9 +417,15 @@ def build_generation_graph(standards: Standards | None = None):
                     "decisions": [Decision(agent=primary.AGENT, summary=f"LLM plan accepted on attempt {attempt}",
                                            detail=planner_agent.summarize(state["ir"]))],
                     "events": [_event("validate", f"Attempt {attempt}: plan passed validation ({len(warnings)} warning(s))", passed=True)]}
+        # Stalling stops the loop only when there is nothing left to try: a section that still has errors
+        # and has not used its fresh plans is one such thing, and a fresh plan gets a few corrections of its own.
+        replans = state.get("ir_replans", {})
+        untried = [m for m in sections if best_sec[m]["errors"] and replans.get(m, 0) < planner_agent.SECTION_REPLANS]
+        grace = attempt - state.get("ir_last_replan", 0) < planner_agent.REPLAN_GRACE
         stalled = attempt - best["attempt"]
         stop = (f"reached the limit of {planner_agent.MAX_ATTEMPTS} attempts" if attempt >= planner_agent.MAX_ATTEMPTS
-                else f"no improvement in {stalled} corrections" if stalled >= planner_agent.NO_PROGRESS_LIMIT else None)
+                else f"no improvement in {stalled} corrections" if stalled >= planner_agent.NO_PROGRESS_LIMIT
+                and not untried and not grace else None)
         if stop:
             combined = planner_agent.merge_plans({m: best_sec[m]["plan"] for m in sections})
             if len(sections) > 1 and combined.model_dump() != best["plan"].model_dump():
@@ -397,6 +433,10 @@ def build_generation_graph(standards: Standards | None = None):
                 return {**base, "ir": combined, "ir_final": stop, "next_after_validate": "compile_ir", "replan_target": None,
                         "events": [_event("validate", f"Attempt {attempt}: {len(errors)} error(s) — {stop}; combining the best "
                                                       f"version of each section for review", passed=False)]}
+            fix = _repair({**state, **base}, best["plan"], best["model"], best["errors"],  # type: ignore[arg-type]
+                          best["connection_of_line"], best["node_of_tag"], stop, best["score"])
+            if fix:
+                return {**base, **fix}
             restored = _restore_best({**state, **base}, stop)  # type: ignore[arg-type]
             return {**base, **restored, "replan_target": None,
                     "events": [_event("validate", f"Attempt {attempt}: {len(errors)} error(s) — {stop}; kept attempt {best['attempt']} "
@@ -408,15 +448,60 @@ def build_generation_graph(standards: Standards | None = None):
                                        detail="; ".join(i.message for i in errors[:6]))],
                 "events": [_event("validate", f"Attempt {attempt}: {verdict} — sent back to the planner", passed=False)]}
 
+    def _repair(state: GenerationState, plan, model, errors, col, nodes, reason: str, score) -> dict | None:
+        """Complete the rule items the planner left behind (deterministic), then validate that once more."""
+        if not errors:
+            return None
+        repaired, applied = planner_agent.auto_fix(plan, errors, model, _ctx(state, std), col, nodes)
+        if not applied:
+            return None
+        return {
+            "ir": repaired, "ir_final": f"{REPAIRED}{reason}", "replan_target": None, "next_after_validate": "compile_ir",
+            "ir_repair": {"applied": applied, "score": score, "reason": reason},
+            "events": [_event("compile_ir", f"{len(applied)} missing rule item(s) completed by the system "
+                                            f"({'; '.join(applied[:4])}{'…' if len(applied) > 4 else ''}) — checking again")],
+        }
+
+    def _finish_repaired(state: GenerationState, report: ValidationReport, errors, warnings) -> dict:
+        """Keep the completed plan when it is better than what the planner reached on its own."""
+        rep_meta = state["ir_repair"]
+        reason = f"{rep_meta['reason']}; {len(rep_meta['applied'])} rule item(s) completed by the system"
+        if (len(errors), len(warnings)) > rep_meta["score"]:  # completing them made it worse: keep the planner's best
+            restored = _restore_best(state, rep_meta["reason"])
+            return {**restored, "ir_final": "", "replan_target": None,
+                    "events": [_event("validate", f"Completing the rule items did not help ({len(errors)} error(s)) — "
+                                                  f"kept the planner's best version", passed=False)]}
+        model = state["merged_model"]
+        model.metadata["planner"] = {**model.metadata.get("planner", {}), "history": state["ir_history"],
+                                     "attempts": len(state["ir_history"]), "max_attempts": planner_agent.MAX_ATTEMPTS,
+                                     "best_attempt": state["ir_best"]["attempt"], "stop_reason": reason,
+                                     "auto_completed": rep_meta["applied"],
+                                     "final_plan": planner_agent.plan_json(state["ir"])}
+        status = "passed validation" if report.passed else f"{len(errors)} error(s); human review required"
+        return {"validation": report, "replan_target": None, "next_after_validate": "finalize", "ir_final": "",
+                "decisions": [Decision(agent=primary.AGENT,
+                                       summary=f"LLM planner stopped ({rep_meta['reason']}); the system completed "
+                                               f"{len(rep_meta['applied'])} missing rule item(s): {status}",
+                                       detail="; ".join(rep_meta["applied"][:8]))],
+                "events": [_event("validate", f"Rule items completed — {status}", passed=report.passed)]}
+
     def _finish_combined(state: GenerationState, report: ValidationReport, errors, warnings) -> dict:
         """The combined best sections, validated: keep it unless the best single attempt was better."""
         best = state["ir_best"]
         reason = state["ir_final"]
         if (len(errors), len(warnings)) > best["score"]:
+            fix = _repair(state, best["plan"], best["model"], best["errors"], best["connection_of_line"],
+                          best["node_of_tag"], reason, best["score"])
+            if fix:
+                return fix
             restored = _restore_best(state, reason)
             return {**restored, "ir_final": "", "replan_target": None,
                     "events": [_event("validate", f"Combined sections: {len(errors)} error(s) — attempt {best['attempt']} "
                                                   f"({len(best['errors'])}) kept for human review", passed=False)]}
+        fix = _repair(state, state["ir"], state["merged_model"], errors, state.get("connection_of_line", {}),
+                      state.get("node_of_tag", {}), reason, (len(errors), len(warnings)))
+        if fix:
+            return fix
         history = state["ir_history"]
         model = state["merged_model"]
         model.metadata["planner"] = {"attempts": len(history), "max_attempts": planner_agent.MAX_ATTEMPTS, "history": history,

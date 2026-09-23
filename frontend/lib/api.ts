@@ -255,7 +255,8 @@ export type Revision = {
       assumptions?: string[];
       warnings?: string[];
       engine?: Engine;
-      planner?: { attempts: number; max_attempts: number; history: PlannerAttempt[]; best_attempt?: number; stop_reason?: string };
+      planner?: { attempts: number; max_attempts: number; history: PlannerAttempt[]; best_attempt?: number; stop_reason?: string;
+                 auto_completed?: string[] };
     };
   };
   validation: { issues: Issue[]; checks_run: Record<string, number>; summary: { passed: boolean; errors: number; warnings: number } };

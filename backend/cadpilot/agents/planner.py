@@ -14,7 +14,7 @@ import re
 from langsmith import traceable
 
 from ..model.engineering import Equipment, ProcessDefinition
-from ..model.ir import PIDPlan, PlanPatch, apply_patch
+from ..model.ir import IRInstrument, IRLoop, IRValve, PIDPlan, PlanPatch, apply_patch
 from ..model.proposals import ValidationIssue
 from .context import AgentContext
 from .instrumentation import rule_applies
@@ -23,6 +23,9 @@ from .llm import get_llm, mark_source
 AGENT = "llm_planner"
 MAX_ATTEMPTS = 14  # hard cap: 1 plan + up to 13 corrections (only failing sections are re-sent)
 NO_PROGRESS_LIMIT = 5  # stop early when this many corrections in a row fail to beat the best plan
+SECTION_REPLAN_AFTER = 3  # a section stuck for this many corrections is planned again from scratch
+SECTION_REPLANS = 2  # at most this many fresh plans per section (then corrections continue)
+REPLAN_GRACE = 3  # corrections a fresh plan gets before "no improvement" can stop the loop
 PLANNER_TIMEOUT_S = 150  # a full plan is a large structured output
 
 SYSTEM = """You are the P&ID planner of CadPilot, an engineering drafting system for dairy plants.
@@ -381,6 +384,71 @@ def expected_location(issue: ValidationIssue, model, ctx: AgentContext, connecti
             f"on {on} (rule {issue.rule})")
 
 
+def auto_fix(plan: PIDPlan, issues: list[ValidationIssue], model, ctx: AgentContext,
+             connection_of_line: dict[str, str], node_of_tag: dict[str, str]) -> tuple[PIDPlan, list[str]]:
+    """Closer: add the rule items the validator says are missing, deterministically.
+
+    A missing valve, instrument or loop has exactly one right answer — the rule says what, and the
+    compiled plan says where — so there is nothing for the planner to decide. Structural errors
+    (connections, headers, cycles) are NOT touched here: those are design choices, and a wrong guess
+    would be worse than the error. Used as the last step of the planner loop, so a draft is not sent
+    to the reviewer with rule items the system could have completed itself."""
+    valve_rules = {v["id"]: v for v in ctx.standards.line_rules["valves"]}
+    inst_rules = {r["id"]: r for r in ctx.standards.instrumentation["rules"]}
+    out = plan.model_copy(deep=True)
+    have_v = {(v.rule, v.on) for v in out.valves}
+    have_i = {(i.function, i.on) for i in out.instruments}
+    have_l = {(lp.rule, lp.equipment) for lp in out.loops}
+    applied: list[str] = []
+
+    def line_of(eq_tag: str, attach: str) -> str | None:
+        """The connection the rule attaches to, in the planner's own ids."""
+        if attach == "equipment":
+            return eq_tag
+        lines = [ln for ln in model.lines if ln.kind != "bypass"
+                 and (ln.to.item if attach == "inlet_line" else ln.from_.item) == eq_tag]
+        return connection_of_line.get(lines[0].tag) if lines else None
+
+    for i in issues:
+        if not i.rule or not i.refs:
+            continue
+        if i.code == "MISSING_VALVE":
+            rule, on = valve_rules.get(i.rule), connection_of_line.get(i.refs[0])
+            if rule is None or on is None or (i.rule, on) in have_v:
+                continue
+            out.valves.append(IRValve(on=on, type=rule["type"], rule=i.rule))
+            have_v.add((i.rule, on))
+            applied.append(f"{rule['type']} ({i.rule}) on {on}")
+        elif i.code in ("MISSING_INSTRUMENT", "MISSING_LOOP"):
+            rule, eq = inst_rules.get(i.rule), i.refs[0]
+            if rule is None:
+                continue
+            on = line_of(eq, rule["attach"])
+            if on is None:
+                continue  # no connection there yet: a structural error the planner must fix first
+            if i.code == "MISSING_LOOP":
+                if (i.rule, eq) in have_l or not rule.get("loop"):
+                    continue
+                spec = rule["instruments"][0]
+                if (spec["function"], on) not in have_i:  # the loop needs its measuring instrument
+                    out.instruments.append(IRInstrument(function=spec["function"], on=on, rule=i.rule,
+                                                        alarms=spec.get("alarms", []), inline_element=bool(spec.get("inline"))))
+                    have_i.add((spec["function"], on))
+                out.loops.append(IRLoop(rule=i.rule, equipment=eq))
+                have_l.add((i.rule, eq))
+                applied.append(f"{rule['loop']['controller']} loop ({i.rule}) on {eq}")
+                continue
+            words = set(i.message.replace(":", " ").split())
+            for spec in rule["instruments"]:
+                if spec["function"] not in words or (spec["function"], on) in have_i:
+                    continue
+                out.instruments.append(IRInstrument(function=spec["function"], on=on, rule=i.rule,
+                                                    alarms=spec.get("alarms", []), inline_element=bool(spec.get("inline"))))
+                have_i.add((spec["function"], on))
+                applied.append(f"{spec['function']} ({i.rule}) on {on}")
+    return out, applied
+
+
 def signature(issue: ValidationIssue) -> str:
     """Stable identity of an error across attempts (tags of planned items are stable too)."""
     return f"{issue.code}|{issue.rule or ''}|{','.join(sorted(issue.refs)) or issue.message}"
@@ -510,17 +578,29 @@ def in_parallel(jobs: dict[str, "callable"]) -> dict[str, object]:
         return {k: f.result() for k, f in futures.items()}
 
 
-@traceable(name="llm_planner", run_type="chain", process_inputs=lambda d: {"attempt": 1, "section": d.get("prefix") or "all"})
+@traceable(name="llm_planner", run_type="chain",
+           process_inputs=lambda d: {"attempt": d.get("attempt", 1), "section": d.get("prefix") or "all",
+                                     "replan": d.get("previous") is not None})
 def plan(ctx: AgentContext, process: ProcessDefinition, equipment: list[Equipment],
-         all_equipment: list[Equipment] | None = None, prefix: str = "") -> PIDPlan | None:
-    """The first, complete plan of one section. Later attempts are corrections (`correct`)."""
+         all_equipment: list[Equipment] | None = None, prefix: str = "", attempt: int = 1,
+         previous: PIDPlan | None = None, problems: str = "") -> PIDPlan | None:
+    """The first, complete plan of one section — or, with `previous`, a fresh plan for a section that
+    corrections could not fix (patching a broken structure keeps the mistake alive; a clean plan does not)."""
     llm = get_llm()
     if not llm.enabled:
         mark_source("rules (fallback: no model configured)")
         return None
-    prompt = _context(ctx, process, equipment, all_equipment, prefix) + "\n\nReturn the complete plan."
+    prompt = _context(ctx, process, equipment, all_equipment, prefix)
+    if previous:
+        prompt += (
+            "\n\nYOUR EARLIER PLAN OF THIS SECTION COULD NOT BE FIXED BY PATCHING. Plan it again from scratch —"
+            " do not copy the structure below, it is here only so you avoid repeating its mistakes.\n"
+            f"Earlier plan:\n{previous.model_dump_json()}\n"
+            f"Errors it still had:\n{problems}\n"
+        )
+    prompt += "\n\nReturn the complete plan."
     result = llm.structured(system=SYSTEM, prompt=prompt, schema=PIDPlan, purpose="llm_planner", timeout_s=PLANNER_TIMEOUT_S)
-    mark_source("llm" if result else "rules (fallback: model reply unusable)", attempt=1)
+    mark_source("llm" if result else "rules (fallback: model reply unusable)", attempt=attempt)
     return prefix_nodes(result, prefix) if result else None
 
 

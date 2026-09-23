@@ -174,16 +174,21 @@ def test_failed_plan_gets_the_errors_back_and_is_corrected(pilot, reference, mon
 
 def test_stops_early_when_corrections_do_not_help(pilot, reference, monkeypatch):
     broken = ir_from_model(reference)
-    broken.loops = []
+    # a structural break: which unit feeds which is the planner's decision, never completed for it
+    broken.connections = broken.connections[:-1]
     pid, fake = planner_project(pilot, monkeypatch, broken)  # every correction is an empty patch
     rev = pilot.run_generation(pid, REQUEST, engine="llm_planner")
 
-    assert len(fake.prompts) == 1 + planner_mod.NO_PROGRESS_LIMIT < planner_mod.MAX_ATTEMPTS
+    assert 1 + planner_mod.NO_PROGRESS_LIMIT <= len(fake.prompts) < planner_mod.MAX_ATTEMPTS
     assert "(STILL UNFIXED" not in fake.prompts[1]  # first correction: nothing has been tried yet
     assert "STILL UNFIXED — also reported after attempt 2" in fake.prompts[2]
+    # before giving up it plans the stuck section again from scratch, as often as it is allowed to
+    replans = [p for p in fake.prompts if "COULD NOT BE FIXED BY PATCHING" in p]
+    assert len(replans) == planner_mod.SECTION_REPLANS and "Errors it still had:" in replans[0]
     meta = rev.model.metadata["planner"]
     assert meta["best_attempt"] == 1 and "no improvement" in meta["stop_reason"]
     assert rev.status == "needs_attention" and not rev.validation.passed
+    assert len(rev.validation.errors) == len(meta["history"][0]["errors"])  # the best attempt is what the reviewer gets
     assert any("human review" in d["summary"] for d in rev.model.metadata["decisions"])
     with pytest.raises(ValueError):
         pilot.approve(pid, rev.revision)
@@ -215,16 +220,26 @@ def test_a_worse_correction_is_discarded_and_the_best_plan_is_kept(pilot, refere
     assert rev.validation.passed and rev.model.counts() == reference.counts()
 
 
-def test_best_attempt_is_what_the_reviewer_gets(pilot, reference, monkeypatch):
+def test_rule_items_the_planner_never_fixes_are_completed_by_the_system(pilot, reference, monkeypatch):
+    """A missing valve, instrument or loop has one right answer, so the loop does not end on one."""
     good = ir_from_model(reference)
     broken = good.model_copy(deep=True)
     broken.loops = []
+    broken.valves = [v for v in broken.valves if v.rule != "LR-PUMP-SUCTION"]
     worse = empty_patch(remove_instruments=[IRInstrumentRef(function=i.function, on=i.on) for i in good.instruments[:5]])
-    pid, _ = planner_project(pilot, monkeypatch, broken, [worse, worse])
+    pid, _ = planner_project(pilot, monkeypatch, broken, [worse, worse])  # the planner never fixes anything
     rev = pilot.run_generation(pid, REQUEST, engine="llm_planner")
+
     meta = rev.model.metadata["planner"]
-    assert meta["best_attempt"] == 1 and meta["attempts"] == 1 + planner_mod.NO_PROGRESS_LIMIT
-    assert len(rev.validation.errors) == len(history_errors := meta["history"][0]["errors"]) and history_errors
+    assert rev.validation.passed and rev.status == "ready_for_review", [i.message for i in rev.validation.errors]
+    assert meta["best_attempt"] == 1 and meta["attempts"] < planner_mod.MAX_ATTEMPTS
+    assert "no improvement" in meta["stop_reason"] and "completed by the system" in meta["stop_reason"]
+    completed = meta["auto_completed"]
+    assert len(completed) == len(good.loops) + len([v for v in good.valves if v.rule == "LR-PUMP-SUCTION"])
+    assert any("LIC loop (IR-" in c for c in completed) and any("butterfly_valve (LR-PUMP-SUCTION)" in c for c in completed)
+    assert rev.model.counts()["control_loops"] == reference.counts()["control_loops"]
+    assert any("completed" in d["summary"] for d in rev.model.metadata["decisions"])
+    pilot.approve(pid, rev.revision)  # a complete draft can be approved
 
 
 def test_compiler_rejects_duplicates_and_rules_used_in_the_wrong_place(pilot, reference, monkeypatch):
@@ -272,7 +287,10 @@ def test_planner_cannot_invent_rules_or_waive_checks(pilot, reference, monkeypat
     pid, _ = planner_project(pilot, monkeypatch, sneaky)
     rev = pilot.run_generation(pid, REQUEST, engine="llm_planner")
     codes = {i.code for i in rev.validation.errors}
-    assert "IR_UNKNOWN_RULE" in codes and "MISSING_VALVE" in codes  # rejected, and the real rule still unmet
+    assert "IR_UNKNOWN_RULE" in codes  # the invented rule is rejected, never applied
+    # and the rule it tried to dodge is still enforced: the system puts the real valve in itself
+    assert any("LR-PUMP-SUCTION" in c for c in rev.model.metadata["planner"]["auto_completed"])
+    assert any(c.provenance.rule == "LR-PUMP-SUCTION" for ln in rev.model.lines for c in ln.inline)
     # the IR has nowhere to put a rule, a waiver, a tag or a size
     fields = set(PIDPlan.model_fields) | {f for m in (IRValve, IRInstrument, IRLoop, IRConnection, IRNode) for f in m.model_fields}
     assert not fields & {"waiver", "waivers", "suppressed", "severity", "tag", "size_dn", "design_flow", "rules"}

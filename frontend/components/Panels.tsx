@@ -196,6 +196,16 @@ export function DecisionsPanel({ rev, projectId }: { rev: Revision; projectId: s
               {md.planner.best_attempt ? ` — this drawing is attempt ${md.planner.best_attempt}, the one with the fewest errors.` : ""}
             </p>
           )}
+          {md.planner.auto_completed?.length ? (
+            <details style={{ margin: "0 0 8px", fontSize: 13 }}>
+              <summary>
+                {md.planner.auto_completed.length} rule item(s) the planner left out were added by the system
+              </summary>
+              <ul style={{ margin: "6px 0 0 18px", padding: 0 }}>
+                {md.planner.auto_completed.map((x, k) => <li key={k}>{x}</li>)}
+              </ul>
+            </details>
+          ) : null}
           <table className="grid" style={{ marginBottom: 20 }}>
             <thead><tr><th>Attempt</th><th>Plan</th><th>Validation</th></tr></thead>
             <tbody>
