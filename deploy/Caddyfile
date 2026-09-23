@@ -4,6 +4,12 @@
 {$SITE_ADDRESS::80} {
 	encode zstd gzip
 
+	# Stand-in CRM tester. Port 4000 is not public; this is the page on :80.
+	redir /crm-test /crm-test/
+	handle_path /crm-test/* {
+		reverse_proxy crm-test:4000
+	}
+
 	# API, including the Server-Sent Events progress stream (Caddy flushes text/event-stream immediately)
 	handle /api/* {
 		reverse_proxy api:8000

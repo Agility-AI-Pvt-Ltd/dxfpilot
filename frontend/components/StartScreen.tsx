@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, ENGINE_LABEL, missingSources, type Engine, type ProjectListItem, type SourceRole } from "@/lib/api";
+import { api, ENGINE_LABEL, missingSources, type Engine, type Project, type ProjectListItem, type SourceRole } from "@/lib/api";
 import ModulePicker from "./ModulePicker";
 import SourceSlots from "./SourceSlots";
 
@@ -10,11 +10,13 @@ type Props = {
   onReady: (projectId: string, request: string, engine?: Engine, modules?: string[], detect?: boolean) => void;
   /** Present when there is a draft to go back to: shows ✕ / Cancel and closes on Esc. */
   onCancel?: () => void;
+  /** A project the CRM created: its name and both workbooks are already filled in */
+  handover?: Project;
 };
 
-export default function StartScreen({ onReady, onCancel }: Props) {
+export default function StartScreen({ onReady, onCancel, handover }: Props) {
   const [name, setName] = useState(
-    () => `Milk reception & processing — ${new Date().toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`,
+    () => handover?.name ?? `Milk reception & processing — ${new Date().toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`,
   );
   const [engine, setEngine] = useState<Engine>("rules");
   const [scopeMode, setScopeMode] = useState<"detect" | "manual">("detect");
@@ -33,17 +35,27 @@ export default function StartScreen({ onReady, onCancel }: Props) {
   }, [onCancel, busy]);
 
   useEffect(() => {
+    if (handover) return; // the CRM chose the project; no list of others
     api.projects().then(setRecent).catch(() => setError(["Cannot reach the CadPilot API on :8000 — is the backend running?"]));
-  }, []);
+  }, [handover]);
 
-  const bothChosen = !!files.mass_balance && !!files.design_data;
+  const has = (role: SourceRole) => !!files[role] || !!handover?.sources[role];
+  const bothChosen = has("mass_balance") && has("design_data");
 
   const start = async (demo: boolean) => {
     setBusy(true);
     setError(null);
     try {
-      let p = await api.create(name.trim() || "Untitled project", demo);
-      if (!demo) p = await api.upload(p.id, files);
+      let p: Project;
+      if (handover) {
+        // the CRM already created the project with both workbooks: only apply what the reviewer changed here
+        p = handover;
+        if (name.trim() && name.trim() !== handover.name) p = await api.rename(p.id, name.trim());
+        if (files.mass_balance || files.design_data) p = await api.upload(p.id, files);
+      } else {
+        p = await api.create(name.trim() || "Untitled project", demo);
+        if (!demo) p = await api.upload(p.id, files);
+      }
       // Check the workbooks actually contain what the agents need before drafting
       const missing = missingSources(p.source_summary);
       if (missing.length) {
@@ -51,8 +63,9 @@ export default function StartScreen({ onReady, onCancel }: Props) {
         setBusy(false);
         return;
       }
-      if (scopeMode === "detect") onReady(p.id, request, engine, undefined, true);
-      else onReady(p.id, request, engine, modules, false);
+      const ask = request.trim() || "Generate the P&ID from the design data";
+      if (scopeMode === "detect") onReady(p.id, ask, engine, undefined, true);
+      else onReady(p.id, ask, engine, modules, false);
     } catch (e) {
       setError([e instanceof Error ? e.message : String(e)]);
       setBusy(false);
@@ -65,7 +78,14 @@ export default function StartScreen({ onReady, onCancel }: Props) {
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
           <div style={{ flex: 1 }}>
           <h1>New P&amp;ID draft</h1>
-          <p>Upload the two workbooks. CadPilot drafts the complete, validated P&amp;ID; you review and correct it in conversation.</p>
+          {handover?.integration ? (
+            <p>
+              CRM record <b className="mono">{handover.integration.external_id}</b> sent its two workbooks. Check the settings
+              below and generate; once you approve the draft, the DXF goes back to the CRM.
+            </p>
+          ) : (
+            <p>Upload the two workbooks. CadPilot drafts the complete, validated P&amp;ID; you review and correct it in conversation.</p>
+          )}
           </div>
           {onCancel && (
             <button className="btn small" onClick={onCancel} disabled={busy} aria-label="Close and go back to the current draft" title="Close (Esc)">
@@ -84,7 +104,13 @@ export default function StartScreen({ onReady, onCancel }: Props) {
         </div>
         <div className="field">
           <label>Design data — two .xlsx workbooks (click or drag &amp; drop)</label>
-          <SourceSlots files={files} onChange={(role, f) => setFiles((x) => ({ ...x, [role]: f }))} disabled={busy} />
+          <SourceSlots
+            files={files}
+            onChange={(role, f) => setFiles((x) => ({ ...x, [role]: f }))}
+            current={handover?.sources}
+            currentSource={handover ? "received from the CRM" : undefined}
+            disabled={busy}
+          />
         </div>
         <div className="field">
           <label htmlFor="req">What should CadPilot draft?</label>
@@ -121,15 +147,22 @@ export default function StartScreen({ onReady, onCancel }: Props) {
           {engine === "llm_planner" && (
             <span style={{ fontSize: 12.5, color: "var(--ink-2)" }}>
               The LLM plans connections, valves and instruments; the same validator checks the plan and sends errors back
-              (up to 3 attempts). If it still fails, the draft comes to you for review instead of looping.
+              (up to 14 attempts). If it still fails, the draft comes to you for review instead of looping.
             </span>
           )}
         </div>
         <button className="btn primary" disabled={busy || !bothChosen} onClick={() => start(false)}>
-          {busy ? "Reading workbooks…" : bothChosen ? "Upload and generate draft" : "Choose both workbooks to continue"}
+          {busy ? "Reading workbooks…" : !bothChosen ? "Choose both workbooks to continue" : handover ? "Generate draft" : "Upload and generate draft"}
         </button>
-        <div className="or">or</div>
-        <button className="btn" disabled={busy} onClick={() => start(true)}>Use the bundled dairy dummy data</button>
+        {!handover && (
+          <>
+            <div className="or">or</div>
+            <button className="btn" disabled={busy} onClick={() => start(true)}>Use the bundled dairy dummy data</button>
+          </>
+        )}
+        {handover?.integration?.return_url && (
+          <a className="btn" href={handover.integration.return_url} style={{ textAlign: "center" }}>← Back to CRM</a>
+        )}
         {onCancel && (
           <button className="btn" disabled={busy} onClick={onCancel}>Cancel — back to the current draft</button>
         )}

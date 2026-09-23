@@ -22,6 +22,18 @@ export type Project = {
   intent: { engine?: Engine; scope_detection?: ScopeDetection | null };
   /** Engineering modules this drawing is composed of; empty = the classic reception → pasteurization line */
   modules: string[];
+  /** Set when the CRM created this project; approved drawings are sent back to it */
+  integration: Integration | null;
+};
+
+export type Delivery = { revision: string; at: string; ok: boolean; http_status: number | null; detail: string };
+export type Integration = {
+  source: string;
+  external_id: string;
+  return_url: string | null;
+  request: string;
+  has_callback: boolean;
+  deliveries: Delivery[];
 };
 
 /** What the scope agent found in the workbooks: plant sections with the rows as evidence */
@@ -279,6 +291,12 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, demo_data }),
     }).then(json<Project>),
+  rename: (id: string, name: string) =>
+    fetch(`${API}/api/projects/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }).then(json<Project>),
   upload: (id: string, files: Partial<Record<SourceRole, File>>) => {
     const fd = new FormData();
     for (const [role, f] of Object.entries(files)) if (f) fd.append(role, f);
@@ -305,7 +323,9 @@ export const api = {
   svg: (id: string, rev: string, highlight = true) =>
     fetch(`${API}/api/projects/${id}/revisions/${rev}/svg?highlight=${highlight}`).then((r) => r.text()),
   approve: (id: string, rev: string) =>
-    fetch(`${API}/api/projects/${id}/revisions/${rev}/approve`, { method: "POST" }).then(json<{ status: string }>),
+    fetch(`${API}/api/projects/${id}/revisions/${rev}/approve`, { method: "POST" }).then(json<{ status: string; delivering: boolean }>),
+  redeliver: (id: string) =>
+    fetch(`${API}/api/projects/${id}/integration/redeliver`, { method: "POST" }).then(json<{ revision: string; delivering: boolean }>),
   modelUrl: (id: string, rev: string) => `${API}/api/projects/${id}/revisions/${rev}/model.json`,
   dxfUrl: (id: string, rev: string) => `${API}/api/projects/${id}/revisions/${rev}/dxf`,
   svgUrl: (id: string, rev: string) => `${API}/api/projects/${id}/revisions/${rev}/svg?highlight=false`,

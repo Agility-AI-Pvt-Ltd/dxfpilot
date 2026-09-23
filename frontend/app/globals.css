@@ -67,6 +67,16 @@ button, input, textarea, select { font: inherit; color: inherit; }
 code, .mono { font-family: var(--mono); font-size: 12.5px; }
 
 .app { display: grid; grid-template-rows: 52px 1fr; height: 100vh; }
+.app.with-banner { grid-template-rows: 52px auto 1fr; }
+
+/* ---- CRM hand-over banner ---- */
+.crm-banner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 7px 16px; font-size: 13px;
+  background: var(--accent-soft); color: var(--ink); border-bottom: 1px solid var(--line); min-width: 0; }
+.crm-banner .crm-id { font-family: var(--mono); font-weight: 600; }
+.crm-banner .crm-state { color: var(--ink-2); }
+.crm-banner .crm-state.ok { color: var(--ok); }
+.crm-banner .crm-state.err { color: var(--err); }
+.crm-banner .spacer { flex: 1; }
 
 /* ---- top bar ---- */
 .topbar { display: flex; align-items: center; gap: 16px; padding: 0 16px; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; }

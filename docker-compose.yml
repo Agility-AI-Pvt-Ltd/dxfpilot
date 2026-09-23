@@ -39,6 +39,11 @@ services:
       LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
       LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-cadpilot}
       LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
+      # CRM integration (docs/CRM_INTEGRATION.md); off while CADPILOT_CRM_API_KEY is empty
+      CADPILOT_PUBLIC_URL: ${CADPILOT_PUBLIC_URL:-}
+      CADPILOT_CRM_API_KEY: ${CADPILOT_CRM_API_KEY:-}
+      CADPILOT_CRM_WEBHOOK_SECRET: ${CADPILOT_CRM_WEBHOOK_SECRET:-}
+      CADPILOT_CORS_ORIGINS: ${CADPILOT_CORS_ORIGINS:-}
     depends_on:
       db:
         condition: service_healthy

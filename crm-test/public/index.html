@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Test CRM</title>
+  <base href="/crm-test/" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <b>Test CRM</b> <span class="muted">— CadPilot integration tester</span>
+    <span class="spacer"></span>
+    <span id="config" class="muted small"></span>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>1 · New P&amp;ID request</h2>
+      <form id="send">
+        <div class="row">
+          <label>CRM record id <input name="external_id" required placeholder="LEAD-1001" /></label>
+          <label>Customer / project name <input name="name" placeholder="Sunrise Dairy 5 LLPD" /></label>
+        </div>
+        <label>Instruction for the first draft (optional)
+          <input name="request" placeholder="empty = detect plant sections from the workbooks" />
+        </label>
+        <div class="row">
+          <label>Mass balance (.xlsx) <input type="file" name="mass_balance" accept=".xlsx" /></label>
+          <label>Design data (.xlsx) <input type="file" name="design_data" accept=".xlsx" /></label>
+        </div>
+        <label class="check">
+          <input type="checkbox" name="use_webhook" />
+          Receive the approved DXF by webhook
+          <span class="muted small">(only if CadPilot can reach this server; otherwise the page pulls it)</span>
+        </label>
+        <div class="row end">
+          <span id="send-msg" class="small"></span>
+          <button type="submit" class="primary">Send to CadPilot</button>
+        </div>
+        <p class="muted small">Sending the same record id again updates that record's workbooks (both files are required only the first time).</p>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="row between">
+        <h2>2 · Records</h2>
+        <button id="refresh" type="button">Refresh all</button>
+      </div>
+      <div id="records"><p class="muted">No records yet.</p></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

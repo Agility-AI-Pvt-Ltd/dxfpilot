@@ -250,7 +250,7 @@ class CadPilot:
     def _run_graph(self, rec: ProjectRecord, source, intent: DesignIntent, on_event=None) -> dict:
         letter = next_revision(rec.current)
         state: dict = dict(initial_state(rec.info, source, intent, rec.registry, letter))
-        for update in self.graph.stream(state, stream_mode="updates", config={"recursion_limit": 60}):  # planner loop: up to 6 × 3 steps
+        for update in self.graph.stream(state, stream_mode="updates", config={"recursion_limit": 140}):  # planner loop: up to 14 × 3 steps, plus the combined recompile
             for _node, delta in update.items():
                 if not delta:
                     continue

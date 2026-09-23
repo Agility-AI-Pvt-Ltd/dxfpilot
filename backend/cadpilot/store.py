@@ -47,6 +47,28 @@ class ChatMessage(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
 
 
+class Delivery(BaseModel):
+    """One attempt to send an approved drawing back to the system the project came from."""
+
+    revision: str
+    at: str = Field(default_factory=now_iso)
+    ok: bool = False
+    http_status: int | None = None
+    detail: str = ""
+
+
+class Integration(BaseModel):
+    """The external system (e.g. the CRM) that created this project and receives its approved drawings."""
+
+    source: str = "crm"
+    external_id: str
+    callback_url: str | None = None  # approved DXF is POSTed here
+    return_url: str | None = None  # "Back to CRM" link in the workspace
+    request: str = ""  # first-draft instruction sent with the data
+    created_at: str = Field(default_factory=now_iso)
+    deliveries: list[Delivery] = Field(default_factory=list)
+
+
 RevisionStatus = Literal["ready_for_review", "needs_attention", "approved", "superseded"]
 
 
@@ -75,6 +97,7 @@ class ProjectRecord(BaseModel):
     chat: list[ChatMessage] = Field(default_factory=list)
     corrections: list[ChangeRequest] = Field(default_factory=list)  # structured learning record
     table_overrides: list[TableOverride] = Field(default_factory=list)  # reviewer column mappings
+    integration: Integration | None = None  # set when an external system (CRM) created the project
 
     @field_validator("sources", mode="before")
     @classmethod
@@ -190,6 +213,14 @@ class ProjectStore(ABC):
     @abstractmethod
     def llm_calls(self, pid: str) -> list[dict[str, Any]]:
         """Oldest first; each row is an LLMCall plus the revision it contributed to (if any)."""
+
+    def find_external(self, source: str, external_id: str) -> str | None:
+        """Id of the project an external system created for its record, if any."""
+        for s in self.list_projects():
+            integ = self.get(s.id).integration
+            if integ and integ.source == source and integ.external_id == external_id:
+                return s.id
+        return None
 
     def close(self) -> None:  # noqa: B027 - optional hook
         pass

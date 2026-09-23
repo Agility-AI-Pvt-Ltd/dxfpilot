@@ -12,11 +12,13 @@ type Props = {
   files: Partial<Record<SourceRole, File>>;
   onChange: (role: SourceRole, file: File) => void;
   current?: Partial<Record<SourceRole, string>>; // filenames already on the project
+  /** Where `current` came from, when it counts as chosen (e.g. "from the CRM") */
+  currentSource?: string;
   disabled?: boolean;
 };
 
-function Slot({ role, title, hint, file, current, onChange, disabled }: {
-  role: SourceRole; title: string; hint: string; file?: File; current?: string; onChange: Props["onChange"]; disabled?: boolean;
+function Slot({ role, title, hint, file, current, currentSource, onChange, disabled }: {
+  role: SourceRole; title: string; hint: string; file?: File; current?: string; currentSource?: string; onChange: Props["onChange"]; disabled?: boolean;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
@@ -31,9 +33,10 @@ function Slot({ role, title, hint, file, current, onChange, disabled }: {
     onChange(role, f);
   };
   const name = file?.name ?? current;
+  const filled = !!file || (!!current && !!currentSource);
   return (
     <div
-      className={`slot${file ? " has" : current ? " current" : ""}${over ? " over" : ""}`}
+      className={`slot${filled ? " has" : current ? " current" : ""}${over ? " over" : ""}`}
       role="button"
       tabIndex={0}
       aria-label={`Upload ${title} workbook`}
@@ -43,11 +46,12 @@ function Slot({ role, title, hint, file, current, onChange, disabled }: {
       onDragLeave={() => setOver(false)}
       onDrop={(e) => { e.preventDefault(); setOver(false); if (!disabled) take(e.dataTransfer.files[0]); }}
     >
-      <div className="slot-icon" aria-hidden>{file ? "✓" : "xlsx"}</div>
+      <div className="slot-icon" aria-hidden>{filled ? "✓" : "xlsx"}</div>
       <div className="slot-text">
         <b>{title}</b>
         <span>{name ? name : hint}</span>
         {file && current && <span className="slot-note">replaces {current}</span>}
+        {!file && current && currentSource && <span className="slot-note">{currentSource}</span>}
         {error && <span className="slot-err">{error}</span>}
       </div>
       <span className="slot-action">{name ? "Replace" : "Choose file"}</span>
@@ -56,11 +60,11 @@ function Slot({ role, title, hint, file, current, onChange, disabled }: {
   );
 }
 
-export default function SourceSlots({ files, onChange, current, disabled }: Props) {
+export default function SourceSlots({ files, onChange, current, currentSource, disabled }: Props) {
   return (
     <div className="slots">
       {SLOTS.map((s) => (
-        <Slot key={s.role} {...s} file={files[s.role]} current={current?.[s.role]} onChange={onChange} disabled={disabled} />
+        <Slot key={s.role} {...s} file={files[s.role]} current={current?.[s.role]} currentSource={currentSource} onChange={onChange} disabled={disabled} />
       ))}
     </div>
   );

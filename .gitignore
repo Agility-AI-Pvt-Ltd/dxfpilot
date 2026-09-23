@@ -12,3 +12,6 @@ node_modules/
 backups/
 
 *.pem
+backend/examples/mock_crm_inbox/
+crm-test/data/
+crm-test/.env.runtime

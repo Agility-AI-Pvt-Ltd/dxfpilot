@@ -1,0 +1,957 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CadPilot CRM Integration Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+:root {
+  --ground: #f4f6f7;
+  --paper: #ffffff;
+  --ink: #15212b;
+  --ink-2: #44525e;
+  --muted: #6c7a86;
+  --line: #dde3e7;
+  --line-2: #c7d0d6;
+  --accent: #0b6a6f;
+  --accent-soft: #e2f1f1;
+  --code-bg: #f0f3f5;
+  --ok: #247a4a; --ok-soft: #e1f2e8;
+  --warn: #9a5d0a; --warn-soft: #fbefd9;
+  --err: #b0392a; --err-soft: #f8e2de;
+  --info: #2b5f9e; --info-soft: #e3ecf8;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --cond: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0f1519; --paper: #151d23; --ink: #e3e9ed; --ink-2: #b4c0c8; --muted: #8494a0;
+    --line: #26323a; --line-2: #33424c; --accent: #52b8bb; --accent-soft: #143234; --code-bg: #10181d;
+    --ok: #6cc795; --ok-soft: #173427; --warn: #e0a54e; --warn-soft: #3a2c14; --err: #ee8a7b; --err-soft: #3d1f1a;
+    --info: #86b1e6; --info-soft: #172a41;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #0f1519; --paper: #151d23; --ink: #e3e9ed; --ink-2: #b4c0c8; --muted: #8494a0;
+  --line: #26323a; --line-2: #33424c; --accent: #52b8bb; --accent-soft: #143234; --code-bg: #10181d;
+  --ok: #6cc795; --ok-soft: #173427; --warn: #e0a54e; --warn-soft: #3a2c14; --err: #ee8a7b; --err-soft: #3d1f1a;
+  --info: #86b1e6; --info-soft: #172a41;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body { background: var(--ground); color: var(--ink); font: 15px/1.6 var(--sans); padding-inline: 16px; padding-block: 0 64px; }
+
+.shell { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 40px; }
+@media (max-width: 900px) { .shell { grid-template-columns: 1fr; gap: 0; } nav.toc { display: none; } }
+
+nav.toc { position: sticky; top: env(safe-area-inset-top, 0px); align-self: start; padding-top: 32px; max-height: 100vh; overflow-y: auto; font-size: 13px; }
+nav.toc p { font: 600 11px/1 var(--cond); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; counter-reset: toc; }
+nav.toc a { display: flex; gap: 8px; padding: 4px 8px; border-radius: 5px; color: var(--ink-2); text-decoration: none; }
+nav.toc a::before { counter-increment: toc; content: counter(toc, decimal-leading-zero); font: 500 11px/1.9 var(--mono); color: var(--muted); }
+nav.toc a:hover, nav.toc a:focus-visible { background: var(--accent-soft); color: var(--ink); outline: none; }
+
+main { min-width: 0; max-width: 860px; }
+
+header.doc { padding: 40px 0 28px; border-bottom: 2px solid var(--ink); margin-bottom: 8px; }
+.eyebrow { font: 600 12px/1 var(--cond); letter-spacing: .1em; text-transform: uppercase; color: var(--accent); margin: 0 0 12px; }
+h1 { font: 700 clamp(28px, 4.2vw, 40px)/1.1 var(--cond); margin: 0 0 14px; text-wrap: balance; letter-spacing: -.01em; }
+.lede { font-size: 17px; color: var(--ink-2); margin: 0; max-width: 68ch; }
+.docmeta { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 20px; font: 12.5px/1.4 var(--mono); color: var(--muted); }
+.docmeta b { color: var(--ink-2); font-weight: 500; }
+
+section { padding-top: 40px; scroll-margin-top: 12px; }
+h2 { font: 600 24px/1.2 var(--cond); margin: 0 0 6px; display: flex; align-items: baseline; gap: 12px; text-wrap: balance; }
+h2 .n { font: 500 13px/1 var(--mono); color: var(--accent); }
+h2 + .sub { color: var(--muted); margin: 0 0 18px; }
+h3 { font: 600 17px/1.3 var(--cond); margin: 28px 0 8px; }
+h4 { font: 600 13px/1.3 var(--sans); margin: 20px 0 6px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); }
+p, li { max-width: 72ch; }
+p { margin: 0 0 12px; }
+ul, ol { padding-left: 22px; margin: 0 0 12px; }
+li { margin-bottom: 4px; }
+a { color: var(--accent); }
+code { font: 0.88em var(--mono); background: var(--code-bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; overflow-wrap: anywhere; }
+strong { font-weight: 600; }
+
+pre { font: 12.8px/1.55 var(--mono); background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; overflow-x: auto; margin: 0 0 16px; tab-size: 2; }
+pre code { background: none; border: 0; padding: 0; font-size: inherit; overflow-wrap: normal; }
+.codehead { display: flex; justify-content: space-between; align-items: center; gap: 12px; font: 500 12px/1 var(--mono); color: var(--muted); margin: 18px 0 6px; }
+.codehead .lang { text-transform: uppercase; letter-spacing: .06em; font-size: 11px; }
+.c { color: var(--muted); }
+
+.table-wrap { overflow-x: auto; margin: 0 0 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+tr:last-child td { border-bottom: 0; }
+th { font: 600 11.5px/1.3 var(--cond); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: var(--ground); white-space: nowrap; }
+td code { white-space: nowrap; }
+td.wrap code { white-space: normal; }
+
+.verb { display: inline-block; font: 600 11px/1 var(--mono); padding: 4px 6px; border-radius: 4px; margin-right: 6px; vertical-align: 1px; }
+.verb.get { background: var(--info-soft); color: var(--info); }
+.verb.post { background: var(--ok-soft); color: var(--ok); }
+.verb.patch { background: var(--warn-soft); color: var(--warn); }
+
+.endpoint { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px 6px; margin: 0 0 18px; }
+.endpoint > .path { font: 500 14px/1.4 var(--mono); margin: 0 0 4px; overflow-wrap: anywhere; }
+.endpoint > .who { font-size: 12.5px; color: var(--muted); margin: 0 0 12px; }
+.endpoint .who b { color: var(--ink-2); font-weight: 500; }
+
+.note { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 10px 14px; border-radius: 0 6px 6px 0; margin: 0 0 16px; font-size: 14px; }
+.note.warn { border-color: var(--warn); background: var(--warn-soft); }
+.note.err { border-color: var(--err); background: var(--err-soft); }
+.note > :last-child { margin-bottom: 0; }
+
+.flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin: 8px 0 20px; counter-reset: step; }
+.flow div { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; font-size: 13.5px; }
+.flow div::before { counter-increment: step; content: "Step " counter(step); display: block; font: 600 11px/1 var(--mono); color: var(--accent); margin-bottom: 6px; }
+.flow b { display: block; font: 600 14px/1.3 var(--cond); margin-bottom: 4px; }
+.flow span { color: var(--ink-2); }
+
+.who-tag { display: inline-block; font: 500 11px/1.5 var(--mono); padding: 1px 6px; border-radius: 99px; border: 1px solid var(--line-2); color: var(--ink-2); white-space: nowrap; }
+
+pre.mermaid { background: var(--paper); text-align: center; }
+
+/* ---- UI mockups ---- */
+.mocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin: 12px 0 20px; }
+.mock { background: var(--paper); border: 1px solid var(--line-2); border-radius: 10px; overflow: hidden; font-size: 13px; }
+.mock-cap { font: 600 11px/1 var(--mono); letter-spacing: .04em; color: var(--muted); padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--ground); display: flex; justify-content: space-between; gap: 8px; }
+.mock-body { padding: 14px; display: grid; gap: 10px; }
+.mock h5 { margin: 0; font: 600 15px/1.3 var(--cond); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pill { font: 600 11px/1 var(--sans); padding: 4px 8px; border-radius: 99px; }
+.pill.none { background: var(--line); color: var(--ink-2); }
+.pill.pending { background: var(--info-soft); color: var(--info); }
+.pill.review { background: var(--warn-soft); color: var(--warn); }
+.pill.approved { background: var(--ok-soft); color: var(--ok); }
+.pill.failed { background: var(--err-soft); color: var(--err); }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12.5px; margin: 0; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+.mfield { display: grid; gap: 4px; font-size: 12px; color: var(--ink-2); }
+.mfield .inp { border: 1px solid var(--line-2); border-radius: 6px; padding: 6px 9px; background: var(--ground); color: var(--ink); font-size: 12.5px; }
+.mfield .inp.file { display: flex; justify-content: space-between; gap: 8px; }
+.mfield .inp.file i { font-style: normal; color: var(--accent); }
+.mbtns { display: flex; flex-wrap: wrap; gap: 6px; }
+.mbtn { font: 500 12px/1 var(--sans); padding: 7px 10px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--paper); color: var(--ink); }
+.mbtn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.mbtn.dis { opacity: .45; }
+.mprev { height: 92px; border: 1px solid var(--line); border-radius: 6px; background:
+  linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 100% 14px,
+  linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0 / 14px 100%, var(--ground);
+  display: grid; place-items: center; font: 500 11px var(--mono); color: var(--muted); }
+.mprev svg { width: 86%; height: 78%; }
+.mprev svg * { stroke: var(--ink-2); fill: none; stroke-width: 1.4; }
+.mstate { font-size: 12px; }
+.mstate.ok { color: var(--ok); } .mstate.err { color: var(--err); } .mstate.muted { color: var(--muted); }
+
+.checklist { list-style: none; padding: 0; display: grid; gap: 6px; }
+.checklist li { display: grid; grid-template-columns: 22px 1fr; gap: 8px; max-width: none; }
+.checklist li::before { content: ""; width: 14px; height: 14px; margin-top: 4px; border: 1.5px solid var(--line-2); border-radius: 3px; }
+
+footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<div class="shell">
+<nav class="toc" aria-label="Contents">
+  <p>Contents</p>
+  <ol>
+    <li><a href="#overview">How it works</a></li>
+    <li><a href="#settings">Settings &amp; env</a></li>
+    <li><a href="#network">Network</a></li>
+    <li><a href="#crm-apis">CRM backend APIs</a></li>
+    <li><a href="#data">CRM data model</a></li>
+    <li><a href="#cadpilot-apis">CadPilot APIs</a></li>
+    <li><a href="#webhook">Approval webhook</a></li>
+    <li><a href="#ui">CRM UI spec</a></li>
+    <li><a href="#code">Reference code</a></li>
+    <li><a href="#cadpilot-side">What happens in CadPilot</a></li>
+    <li><a href="#test">Test checklist</a></li>
+    <li><a href="#trouble">Troubleshooting</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="doc">
+  <p class="eyebrow">Integration spec · for the CRM developer</p>
+  <h1>Connecting the CRM to CadPilot</h1>
+  <p class="lede">A CRM record sends its two Excel workbooks to CadPilot. The CRM user opens CadPilot from a link, checks the options and generates the P&amp;ID. Once a reviewer approves it, the DXF drawing comes back to the CRM, where users can preview and download it.</p>
+  <div class="docmeta">
+    <span><b>Auth</b> shared API key, server to server</span>
+    <span><b>Return channel</b> signed webhook and/or polling</span>
+    <span><b>Files</b> 2 × .xlsx in, 1 × .dxf out (+ SVG preview)</span>
+  </div>
+</header>
+
+<!-- ============================================================ -->
+<section id="overview">
+  <h2><span class="n">01</span>How it works</h2>
+  <p class="sub">Four steps. The CRM builds steps 1, 2 and 4. Step 3 happens entirely inside CadPilot.</p>
+
+  <div class="flow">
+    <div><b>Send</b><span>The user fills the P&amp;ID form on a CRM record: name plus the two workbooks. The CRM backend POSTs them to CadPilot and stores the <code>launch_url</code> it gets back.</span></div>
+    <div><b>Open</b><span>The user clicks <em>Open in CadPilot</em>, a plain link to <code>launch_url</code>. CadPilot shows its <em>New P&amp;ID draft</em> page with the name and both files already filled in.</span></div>
+    <div><b>Draft &amp; approve</b><span>In CadPilot the user picks the plant sections and engine, generates the P&amp;ID, corrects it in chat and approves it.</span></div>
+    <div><b>Receive</b><span>CadPilot POSTs the approved DXF to the CRM webhook. The CRM stores it and shows a preview and a <em>Download DXF</em> button on the record.</span></div>
+  </div>
+
+  <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  actor U as CRM user
+  participant CU as CRM UI (browser)
+  participant CB as CRM backend
+  participant CP as CadPilot (EC2)
+  U->>CU: Fill P&ID form, attach 2 × .xlsx
+  CU->>CB: POST /api/records/{id}/pid (multipart)
+  CB->>CP: POST /api/integrations/crm/projects (X-API-Key)
+  CP-->>CB: project_id, launch_url, state=draft_pending
+  CB-->>CU: saved request + launch_url
+  U->>CP: Click "Open in CadPilot" (launch_url, new tab)
+  Note over U,CP: Choose options → Generate → review → Approve
+  CP->>CB: POST /webhooks/cadpilot (signed JSON with DXF)
+  CB-->>CP: 200 OK
+  U->>CU: Back on the record
+  CU->>CB: GET /api/records/{id}/pid
+  CB-->>CU: state=approved, preview + download
+  </pre>
+
+  <div class="note">
+    <p><strong>The API key never reaches the browser.</strong> The CRM UI only talks to the CRM backend, and the CRM backend talks to CadPilot. The only CadPilot URLs the browser sees are <code>launch_url</code> and, optionally, the signed preview and download links.</p>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="settings">
+  <h2><span class="n">02</span>Settings &amp; environment variables</h2>
+  <p class="sub">The CadPilot team provides three values. Set them on the CRM backend only.</p>
+
+  <h3>CRM backend <span class="who-tag">you set these</span></h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Variable</th><th>Example</th><th>What it is</th></tr></thead>
+    <tbody>
+      <tr><td><code>CADPILOT_URL</code></td><td><code>http://13.233.10.20</code></td><td>Base address of CadPilot, used for every server-to-server call. No trailing slash and no port 3000 (the gateway serves <code>/api</code> on 80/443).</td></tr>
+      <tr><td><code>CADPILOT_CRM_API_KEY</code></td><td><code>9f2c…e41a</code> (64 hex)</td><td>Sent as <code>X-API-Key</code> on every call to CadPilot. <strong>Secret</strong>: backend only, never in UI code or git.</td></tr>
+      <tr><td><code>CADPILOT_WEBHOOK_SECRET</code></td><td><code>71ab…0cd3</code> (64 hex)</td><td>Checks the <code>X-CadPilot-Signature</code> on incoming webhooks. <strong>Secret</strong>.</td></tr>
+      <tr><td><code>CRM_PUBLIC_URL</code></td><td><code>https://crm.example.com</code></td><td>The CRM's own public address. Used to build <code>callback_url</code> (webhook) and <code>return_url</code> (the "Back to CRM" button in CadPilot).</td></tr>
+      <tr><td><code>CADPILOT_USE_WEBHOOK</code></td><td><code>true</code></td><td>Optional switch. <code>true</code> sends <code>callback_url</code> with each request. Set it to <code>false</code> if CadPilot cannot reach the CRM; the CRM then relies on polling.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>CadPilot server <span class="who-tag">CadPilot team sets these</span></h3>
+  <p>For reference, so both sides agree on the values. They live in <code>/opt/dextool/.env</code> on the CadPilot EC2.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Variable</th><th>Must equal</th></tr></thead>
+    <tbody>
+      <tr><td><code>CADPILOT_PUBLIC_URL</code></td><td>The address users open CadPilot at. Every <code>launch_url</code>, <code>dxf_url</code> and <code>svg_url</code> starts with it. If links come back as <code>localhost</code>, this setting is wrong.</td></tr>
+      <tr><td><code>CADPILOT_CRM_API_KEY</code></td><td>The same value as the CRM's <code>CADPILOT_CRM_API_KEY</code>. While it is empty, the integration is off and returns <code>503</code>.</td></tr>
+      <tr><td><code>CADPILOT_CRM_WEBHOOK_SECRET</code></td><td>The same value as the CRM's <code>CADPILOT_WEBHOOK_SECRET</code>. Defaults to the API key if unset.</td></tr>
+      <tr><td><code>CADPILOT_CORS_ORIGINS</code></td><td>Leave empty. It is needed only if CRM browser code calls CadPilot directly, which this design avoids.</td></tr>
+    </tbody>
+  </table></div>
+
+  <pre><code><span class="c"># CRM backend .env (example)</span>
+CADPILOT_URL=http://13.233.10.20
+CADPILOT_CRM_API_KEY=9f2c...............................................e41a
+CADPILOT_WEBHOOK_SECRET=71ab..............................................0cd3
+CRM_PUBLIC_URL=https://crm.example.com
+CADPILOT_USE_WEBHOOK=true</code></pre>
+  <p>Generate both secrets once with <code>openssl rand -hex 32</code>, put them on both servers, and share them only through a password manager.</p>
+</section>
+
+<!-- ============================================================ -->
+<section id="network">
+  <h2><span class="n">03</span>Network &amp; firewall</h2>
+  <p class="sub">The CRM and CadPilot run on different EC2 instances. Three connections must work.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>From → To</th><th>Used for</th><th>Allow</th></tr></thead>
+    <tbody>
+      <tr><td>CRM backend → CadPilot</td><td>Send workbooks, status, DXF download</td><td>CadPilot security group: inbound 80/443 from the CRM EC2's IP</td></tr>
+      <tr><td>User's browser → CadPilot</td><td>Opening <code>launch_url</code>, signed preview/download links</td><td>CadPilot security group: inbound 80/443 from users (office/VPN range)</td></tr>
+      <tr><td>CadPilot → CRM backend</td><td>Approval webhook</td><td>CRM security group: inbound on the webhook port from CadPilot EC2's public IP. <em>Skip this if you use polling only.</em></td></tr>
+    </tbody>
+  </table></div>
+  <div class="note warn">
+    <p><strong>Use HTTPS in production</strong> on both sides. The API key, the workbooks and the drawings otherwise travel in plain text. CadPilot switches to HTTPS automatically when it is given a domain (<code>SITE_ADDRESS</code>).</p>
+  </div>
+  <p>Check from the CRM EC2: <code>curl http://&lt;cadpilot&gt;/api/health</code> should return <code>{"ok":true,…}</code>.</p>
+</section>
+
+<!-- ============================================================ -->
+<section id="crm-apis">
+  <h2><span class="n">04</span>APIs to add to the CRM backend</h2>
+  <p class="sub">Five routes. Four are called by the CRM UI and one by CadPilot. Paths are suggestions; rename them to fit your conventions.</p>
+
+  <div class="table-wrap"><table>
+    <thead><tr><th>Route</th><th>Called by</th><th>Does</th></tr></thead>
+    <tbody>
+      <tr><td><span class="verb post">POST</span><code>/api/records/:recordId/pid</code></td><td>CRM UI</td><td>Upload the workbooks and create or update the CadPilot project</td></tr>
+      <tr><td><span class="verb get">GET</span><code>/api/records/:recordId/pid</code></td><td>CRM UI</td><td>Current state; refreshes from CadPilot</td></tr>
+      <tr><td><span class="verb get">GET</span><code>/api/records/:recordId/pid/dxf</code></td><td>CRM UI (link)</td><td>Download the approved DXF</td></tr>
+      <tr><td><span class="verb get">GET</span><code>/api/records/:recordId/pid/preview.svg</code></td><td>CRM UI (&lt;img&gt;)</td><td>Preview of the approved drawing</td></tr>
+      <tr><td><span class="verb post">POST</span><code>/webhooks/cadpilot</code></td><td>CadPilot</td><td>Receive the approved DXF; verify and store it</td></tr>
+      <tr><td><span class="verb post">POST</span><code>/api/records/:recordId/pid/redeliver</code></td><td>CRM UI (optional)</td><td>Ask CadPilot to send the webhook again</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="endpoint">
+    <p class="path"><span class="verb post">POST</span>/api/records/:recordId/pid</p>
+    <p class="who">Called by <b>CRM UI</b> when the user clicks <em>Send to CadPilot</em> · <code>multipart/form-data</code></p>
+    <h4>Request from the UI</h4>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Field</th><th>Type</th><th>Rules</th></tr></thead>
+      <tbody>
+        <tr><td><code>name</code></td><td>text</td><td>Project name shown in CadPilot. Pre-fill it from the record, e.g. the customer name.</td></tr>
+        <tr><td><code>request</code></td><td>text, optional</td><td>First-draft instruction. The user can also change it in CadPilot.</td></tr>
+        <tr><td><code>mass_balance</code></td><td>file</td><td><code>.xlsx</code>; required the first time, optional when updating</td></tr>
+        <tr><td><code>design_data</code></td><td>file</td><td><code>.xlsx</code>; required the first time, optional when updating</td></tr>
+      </tbody>
+    </table></div>
+    <h4>What the backend does</h4>
+    <ol>
+      <li>Check that the user may edit <code>recordId</code>, and that both files are <code>.xlsx</code> and together under 25 MB.</li>
+      <li>Call CadPilot <code>POST /api/integrations/crm/projects</code> (<a href="#cp-create">section 06</a>) with <code>external_id = recordId</code>, <code>callback_url = CRM_PUBLIC_URL + "/webhooks/cadpilot"</code> and <code>return_url = CRM_PUBLIC_URL + "/records/" + recordId</code>.</li>
+      <li>Upsert the <code>pid_requests</code> row (<a href="#data">section 05</a>) with <code>project_id</code>, <code>launch_url</code> and <code>state</code>.</li>
+      <li>Return the row to the UI.</li>
+    </ol>
+    <h4>Response to the UI</h4>
+<pre><code>{
+  "record_id": "LEAD-1001",
+  "project_id": "8f453f24f363",
+  "state": "draft_pending",
+  "launch_url": "http://13.233.10.20/?p=8f453f24f363&amp;from=crm",
+  "files": { "mass_balance": "Mass_Balance.xlsx", "design_data": "Design_Data.xlsx" },
+  "approved": null
+}</code></pre>
+    <p>Pass CadPilot's error text through for 400s (for example "Could not read the workbook: …"). Map 401/503 from CadPilot to <code>502 "CadPilot integration misconfigured"</code>, because the user cannot fix those.</p>
+  </div>
+
+  <div class="endpoint">
+    <p class="path"><span class="verb get">GET</span>/api/records/:recordId/pid</p>
+    <p class="who">Called by <b>CRM UI</b> on page load, on <em>Refresh status</em>, and when the tab regains focus</p>
+    <p>Call CadPilot <code>GET /api/integrations/crm/projects/{recordId}</code>, update the stored row (state, current revision, approved revision, links) and return it. If CadPilot is unreachable, return the stored row with <code>"stale": true</code> so the page still renders.</p>
+<pre><code>{
+  "record_id": "LEAD-1001",
+  "project_id": "8f453f24f363",
+  "state": "approved",                       <span class="c">// none | draft_pending | in_review | approved</span>
+  "launch_url": "http://13.233.10.20/?p=8f453f24f363&amp;from=crm",
+  "current_revision": "B",
+  "approved": {
+    "revision": "B",
+    "approved_by": "reviewer",
+    "approved_at": "2026-09-22T05:33:14+00:00",
+    "dxf_filename": "CP-PID-8F45-001_revB.dxf",
+    "received_via": "webhook"                <span class="c">// webhook | pull</span>
+  },
+  "stale": false
+}</code></pre>
+  </div>
+
+  <div class="endpoint">
+    <p class="path"><span class="verb get">GET</span>/api/records/:recordId/pid/dxf</p>
+    <p class="who">Linked from the <b>Download DXF</b> button</p>
+    <p>Serve the stored DXF with <code>Content-Type: application/dxf</code> and <code>Content-Disposition: attachment; filename="&lt;dxf_filename&gt;"</code>. If there is no stored copy (for example, the webhook was missed), fetch it from CadPilot <code>GET /api/integrations/crm/projects/{recordId}/dxf</code>, store it, then serve it. Return <code>409</code> while nothing is approved.</p>
+  </div>
+
+  <div class="endpoint">
+    <p class="path"><span class="verb get">GET</span>/api/records/:recordId/pid/preview.svg</p>
+    <p class="who">Used as <b>&lt;img src&gt;</b> on the record page</p>
+    <p>Fetch the stored <code>svg_url</code> (from the webhook or status) and stream it back as <code>image/svg+xml</code>. Proxying keeps the CRM page on its own origin and applies CRM permissions. Alternatively, put <code>svg_url</code> straight into <code>&lt;img&gt;</code>: it is signed and works without the key, but anyone holding the URL can open it.</p>
+  </div>
+
+  <div class="endpoint">
+    <p class="path"><span class="verb post">POST</span>/webhooks/cadpilot</p>
+    <p class="who">Called by <b>CadPilot</b> when a revision is approved · public route, no CRM login, authenticated by signature</p>
+    <ol>
+      <li>Read the <strong>raw</strong> body; don't parse JSON first. Limit it to 30 MB.</li>
+      <li>Verify the signature and timestamp (<a href="#webhook">section 07</a>). If either fails, return <code>401</code>.</li>
+      <li>Decode <code>dxf.content_base64</code> and store the file (S3, disk or DB) under <code>external_id</code> + <code>revision</code>.</li>
+      <li>Update the row: <code>state=approved</code>, approved revision, <code>svg_url</code>, <code>dxf_url</code>, <code>received_via=webhook</code>.</li>
+      <li>Return <code>200</code> within ~10 s. Do slow work (notifications, emails) afterwards.</li>
+    </ol>
+    <p><strong>Must be idempotent.</strong> CadPilot retries failures and a reviewer can press <em>Send again</em>, so the same <code>external_id</code> + <code>revision</code> can arrive twice. Overwrite; don't duplicate.</p>
+  </div>
+
+  <div class="endpoint">
+    <p class="path"><span class="verb post">POST</span>/api/records/:recordId/pid/redeliver <span class="who-tag">optional</span></p>
+    <p class="who">Admin / support button</p>
+    <p>Proxies CadPilot <code>POST /api/integrations/crm/projects/{recordId}/redeliver</code>. Useful after the CRM webhook was down.</p>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="data">
+  <h2><span class="n">05</span>CRM data model</h2>
+  <p class="sub">One row per CRM record. Suggested table <code>pid_requests</code>.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Column</th><th>Type</th><th>Source</th></tr></thead>
+    <tbody>
+      <tr><td><code>record_id</code> <span class="who-tag">PK</span></td><td>text</td><td>CRM record id, sent to CadPilot as <code>external_id</code></td></tr>
+      <tr><td><code>project_id</code></td><td>text</td><td>CadPilot create response</td></tr>
+      <tr><td><code>launch_url</code></td><td>text</td><td>CadPilot create response</td></tr>
+      <tr><td><code>state</code></td><td>text</td><td><code>draft_pending</code> · <code>in_review</code> · <code>approved</code></td></tr>
+      <tr><td><code>mass_balance_name</code>, <code>design_data_name</code></td><td>text</td><td>Uploaded filenames, for display</td></tr>
+      <tr><td><code>current_revision</code></td><td>text</td><td>Status: <code>current_revision</code></td></tr>
+      <tr><td><code>approved_revision</code>, <code>approved_by</code>, <code>approved_at</code></td><td>text / timestamptz</td><td>Webhook or status <code>approved_revision</code></td></tr>
+      <tr><td><code>dxf_filename</code>, <code>dxf_storage_key</code>, <code>dxf_size</code></td><td>text / int</td><td>Webhook <code>dxf.*</code>; where you stored the file</td></tr>
+      <tr><td><code>dxf_url</code>, <code>svg_url</code></td><td>text</td><td>Signed CadPilot links (for pulling and preview)</td></tr>
+      <tr><td><code>received_via</code></td><td>text</td><td><code>webhook</code> or <code>pull</code></td></tr>
+      <tr><td><code>created_by</code>, <code>created_at</code>, <code>updated_at</code></td><td>—</td><td>CRM audit fields</td></tr>
+    </tbody>
+  </table></div>
+  <p>If you want to keep the history of every approved revision, store the DXFs in a child table keyed <code>(record_id, revision)</code>; the row above then points to the latest one.</p>
+</section>
+
+<!-- ============================================================ -->
+<section id="cadpilot-apis">
+  <h2><span class="n">06</span>CadPilot APIs (what the CRM backend calls)</h2>
+  <p class="sub">Base: <code>CADPILOT_URL</code>. Auth: header <code>X-API-Key: &lt;CADPILOT_CRM_API_KEY&gt;</code> (or <code>Authorization: Bearer &lt;key&gt;</code>).</p>
+
+  <div class="endpoint" id="cp-create">
+    <p class="path"><span class="verb post">POST</span>/api/integrations/crm/projects</p>
+    <p class="who">Create or update the project for a CRM record · <code>multipart/form-data</code> · <b>idempotent on <code>external_id</code></b></p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Field</th><th>Required</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td><code>external_id</code></td><td>yes</td><td>CRM record id, ≤ 200 chars. The same id again updates the same project, never a new one.</td></tr>
+        <tr><td><code>mass_balance</code></td><td>new record: yes</td><td><code>.xlsx</code> file. Replaces the stored one when sent again.</td></tr>
+        <tr><td><code>design_data</code></td><td>new record: yes</td><td><code>.xlsx</code> file (equipment list + design criteria)</td></tr>
+        <tr><td><code>name</code></td><td>no</td><td>Project name; default <code>CRM &lt;external_id&gt;</code></td></tr>
+        <tr><td><code>callback_url</code></td><td>no</td><td><code>http(s)</code> URL of your webhook. Omit it to use polling only.</td></tr>
+        <tr><td><code>return_url</code></td><td>no</td><td><code>http(s)</code> URL for CadPilot's "← Back to CRM" button</td></tr>
+        <tr><td><code>request</code></td><td>no</td><td>Suggested first-draft instruction</td></tr>
+      </tbody>
+    </table></div>
+<pre><code>curl -X POST "$CADPILOT_URL/api/integrations/crm/projects" \
+  -H "X-API-Key: $CADPILOT_CRM_API_KEY" \
+  -F external_id=LEAD-1001 \
+  -F name="Sunrise Dairy 5 LLPD" \
+  -F callback_url=https://crm.example.com/webhooks/cadpilot \
+  -F return_url=https://crm.example.com/records/LEAD-1001 \
+  -F mass_balance=@Mass_Balance.xlsx \
+  -F design_data=@Design_Data.xlsx</code></pre>
+    <h4>200 response</h4>
+<pre><code>{
+  "project_id": "8f453f24f363",
+  "external_id": "LEAD-1001",
+  "created": true,                         <span class="c">// false = existing record updated</span>
+  "name": "Sunrise Dairy 5 LLPD",
+  "drawing_number": "CP-PID-8F45-001",
+  "launch_url": "http://13.233.10.20/?p=8f453f24f363&amp;from=crm",
+  "status_url": "http://13.233.10.20/api/integrations/crm/projects/LEAD-1001",
+  "sources": { "mass_balance": "Mass_Balance.xlsx", "design_data": "Design_Data.xlsx" },
+  "state": "draft_pending",
+  "current_revision": null,
+  "current_status": null,
+  "approved_revision": null,
+  "deliveries": []
+}</code></pre>
+    <h4>Errors (body: <code>{"detail": "…"}</code>)</h4>
+    <div class="table-wrap"><table>
+      <tbody>
+        <tr><td><code>400</code></td><td class="wrap">A new record without both workbooks · a file that isn't <code>.xlsx</code> · a workbook that can't be read · a bad <code>callback_url</code>/<code>return_url</code> · an empty <code>external_id</code>. Show the <code>detail</code> to the user.</td></tr>
+        <tr><td><code>401</code></td><td>Wrong API key</td></tr>
+        <tr><td><code>413</code></td><td>Body over 25 MB (gateway limit)</td></tr>
+        <tr><td><code>503</code></td><td>The integration is switched off on CadPilot (no key configured)</td></tr>
+      </tbody>
+    </table></div>
+    <p>Reading the workbooks takes a few seconds, so set an HTTP timeout of at least 120 s.</p>
+  </div>
+
+  <div class="endpoint">
+    <p class="path"><span class="verb get">GET</span>/api/integrations/crm/projects/{external_id}</p>
+    <p class="who">Status (poll this, or call it when the user opens the record)</p>
+<pre><code>{
+  "project_id": "8f453f24f363",
+  "external_id": "LEAD-1001",
+  "name": "Sunrise Dairy 5 LLPD",
+  "drawing_number": "CP-PID-8F45-001",
+  "launch_url": "http://13.233.10.20/?p=8f453f24f363&amp;from=crm",
+  "sources": { "mass_balance": "Mass_Balance.xlsx", "design_data": "Design_Data.xlsx" },
+  "state": "approved",
+  "current_revision": "B",
+  "current_status": "approved",            <span class="c">// ready_for_review | needs_attention | approved | superseded</span>
+  "approved_revision": {
+    "revision": "B",
+    "approved_by": "reviewer",
+    "approved_at": "2026-09-22T05:33:14+00:00",
+    "dxf_url": "http://13.233.10.20/api/integrations/crm/files/8f453f24f363/B.dxf?token=…",
+    "svg_url": "http://13.233.10.20/api/integrations/crm/files/8f453f24f363/B.svg?token=…"
+  },
+  "deliveries": [
+    { "revision": "B", "at": "2026-09-22T05:33:15+00:00", "ok": true, "http_status": 200, "detail": "Delivered to the CRM (200)" }
+  ]
+}</code></pre>
+    <div class="table-wrap"><table>
+      <thead><tr><th><code>state</code></th><th>Meaning</th><th>Show in CRM</th></tr></thead>
+      <tbody>
+        <tr><td><code>draft_pending</code></td><td>Workbooks received; nobody has generated a draft yet</td><td>"Waiting for engineer to generate the draft"</td></tr>
+        <tr><td><code>in_review</code></td><td>At least one draft exists; not approved</td><td>"Draft rev X in review"</td></tr>
+        <tr><td><code>approved</code></td><td>A revision is approved. <code>approved_revision</code> is the latest approved one; <code>current_revision</code> may be a newer draft.</td><td>Preview + Download DXF</td></tr>
+      </tbody>
+    </table></div>
+    <p><code>404</code> means no project exists for this <code>external_id</code>.</p>
+  </div>
+
+  <div class="endpoint">
+    <p class="path"><span class="verb get">GET</span>/api/integrations/crm/projects/{external_id}/dxf</p>
+    <p class="who">Latest approved DXF as a file · <code>application/dxf</code> · filename in <code>Content-Disposition</code></p>
+    <p><code>409</code> means nothing is approved yet.</p>
+  </div>
+
+  <div class="endpoint">
+    <p class="path"><span class="verb post">POST</span>/api/integrations/crm/projects/{external_id}/redeliver</p>
+    <p class="who">Send the latest approved drawing to <code>callback_url</code> again</p>
+    <p>Returns <code>{"revision":"B","delivering":true}</code>. <code>409</code> means nothing is approved yet or no <code>callback_url</code> is set.</p>
+  </div>
+
+  <div class="endpoint">
+    <p class="path"><span class="verb get">GET</span>/api/integrations/crm/files/{project_id}/{rev}.dxf|.svg?token=…</p>
+    <p class="who">Signed links from <code>dxf_url</code> / <code>svg_url</code> · <b>no API key</b></p>
+    <p>These only serve <strong>approved</strong> revisions. The token is tied to the project, revision and file type; a wrong token returns <code>404</code>. Treat the links like the drawing itself.</p>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="webhook">
+  <h2><span class="n">07</span>Approval webhook (CadPilot → CRM)</h2>
+  <p class="sub">Sent to <code>callback_url</code> each time a reviewer approves a revision.</p>
+
+  <h4>Headers</h4>
+<pre><code>POST /webhooks/cadpilot
+Content-Type: application/json
+User-Agent: CadPilot-Webhook/1
+X-CadPilot-Event: drawing.approved
+X-CadPilot-Timestamp: 1790000000
+X-CadPilot-Signature: sha256=3f9a…c07e</code></pre>
+
+  <h4>Body</h4>
+<pre><code>{
+  "event": "drawing.approved",
+  "external_id": "LEAD-1001",
+  "project_id": "8f453f24f363",
+  "project_name": "Sunrise Dairy 5 LLPD",
+  "drawing_number": "CP-PID-8F45-001",
+  "revision": "B",
+  "approved_by": "reviewer",
+  "approved_at": "2026-09-22T05:33:14+00:00",
+  "counts": { "equipment": 75, "lines": 137, "instruments": 179, "control_loops": 41 },
+  "warnings": 1,
+  "dxf": {
+    "filename": "CP-PID-8F45-001_revB.dxf",
+    "content_type": "application/dxf",
+    "size": 544902,
+    "content_base64": "ICAwClNFQ1RJT04K…",
+    "url": "http://13.233.10.20/api/integrations/crm/files/8f453f24f363/B.dxf?token=…"
+  },
+  "svg_url": "http://13.233.10.20/api/integrations/crm/files/8f453f24f363/B.svg?token=…",
+  "launch_url": "http://13.233.10.20/?p=8f453f24f363&amp;from=crm"
+}</code></pre>
+  <p>A whole-plant DXF is about 0.2–0.6 MB (base64 adds a third), so allow request bodies up to 30 MB.</p>
+
+  <h4>Verifying the signature</h4>
+  <ol>
+    <li><code>signed = timestamp + "." + rawBody</code> (the exact bytes received)</li>
+    <li><code>expected = "sha256=" + hex(HMAC_SHA256(CADPILOT_WEBHOOK_SECRET, signed))</code></li>
+    <li>Compare it with <code>X-CadPilot-Signature</code> using a constant-time comparison.</li>
+    <li>Reject if <code>|now − timestamp| &gt; 300</code> seconds (replay protection).</li>
+  </ol>
+
+  <h4>Retries</h4>
+  <p>CadPilot counts any <code>2xx</code> as delivered. Anything else, or a timeout (30 s), is retried 3 times in total, 2 s and 4 s apart. After that the reviewer sees "Delivery failed · Send again" in CadPilot, and you can call <code>redeliver</code>. As a safety net, the CRM's status refresh also pulls the DXF when <code>state</code> is <code>approved</code> but no file is stored.</p>
+</section>
+
+<!-- ============================================================ -->
+<section id="ui">
+  <h2><span class="n">08</span>CRM UI spec</h2>
+  <p class="sub">One panel on the CRM record page (tab or card named <em>P&amp;ID</em>) with four states. The mockups show layout and content, not the CRM's visual style.</p>
+
+  <div class="mocks">
+    <div class="mock">
+      <div class="mock-cap"><span>STATE A · NO REQUEST YET</span><span>form</span></div>
+      <div class="mock-body">
+        <h5>P&amp;ID drawing <span class="pill none">Not started</span></h5>
+        <div class="mfield">Project name<div class="inp">Sunrise Dairy 5 LLPD</div></div>
+        <div class="mfield">Mass balance (.xlsx)<div class="inp file"><span>Mass_Balance.xlsx</span><i>Change</i></div></div>
+        <div class="mfield">Equipment &amp; design data (.xlsx)<div class="inp file"><span>Choose file…</span><i>Browse</i></div></div>
+        <div class="mfield">Instruction (optional)<div class="inp" style="color:var(--muted)">e.g. Reception, pasteurization and CIP only</div></div>
+        <div class="mbtns"><span class="mbtn primary dis">Send to CadPilot</span></div>
+        <span class="mstate muted">Enabled once both workbooks are chosen</span>
+      </div>
+    </div>
+
+    <div class="mock">
+      <div class="mock-cap"><span>STATE B · DRAFT PENDING</span><span>state=draft_pending</span></div>
+      <div class="mock-body">
+        <h5>Sunrise Dairy 5 LLPD <span class="pill pending">Waiting for draft</span></h5>
+        <dl class="kv">
+          <dt>Workbooks</dt><dd>Mass_Balance.xlsx · Design_Data.xlsx</dd>
+          <dt>Sent</dt><dd>22 Sep 2026, 11:03 by Priya</dd>
+          <dt>Drawing</dt><dd>CP-PID-8F45-001</dd>
+        </dl>
+        <div class="mbtns">
+          <span class="mbtn primary">Open in CadPilot ↗</span>
+          <span class="mbtn">Refresh status</span>
+          <span class="mbtn">Replace workbooks</span>
+        </div>
+        <span class="mstate muted">Open CadPilot to choose the plant sections and generate the draft.</span>
+      </div>
+    </div>
+
+    <div class="mock">
+      <div class="mock-cap"><span>STATE C · IN REVIEW</span><span>state=in_review</span></div>
+      <div class="mock-body">
+        <h5>Sunrise Dairy 5 LLPD <span class="pill review">In review · rev A</span></h5>
+        <dl class="kv">
+          <dt>Drawing</dt><dd>CP-PID-8F45-001</dd>
+          <dt>Latest draft</dt><dd>rev A · ready for review</dd>
+          <dt>Approved</dt><dd>—</dd>
+        </dl>
+        <div class="mbtns">
+          <span class="mbtn primary">Continue in CadPilot ↗</span>
+          <span class="mbtn">Refresh status</span>
+        </div>
+        <span class="mstate muted">The DXF appears here automatically after approval.</span>
+      </div>
+    </div>
+
+    <div class="mock">
+      <div class="mock-cap"><span>STATE D · APPROVED</span><span>state=approved</span></div>
+      <div class="mock-body">
+        <h5>Sunrise Dairy 5 LLPD <span class="pill approved">Approved · rev B</span></h5>
+        <div class="mprev" role="img" aria-label="Preview of the approved P&amp;ID">
+          <svg viewBox="0 0 240 70" aria-hidden="true">
+            <rect x="8" y="22" width="30" height="26" rx="3"/><circle cx="72" cy="35" r="11"/><rect x="104" y="20" width="44" height="30" rx="2"/>
+            <path d="M38 35 H61 M83 35 H104 M148 35 H176 M176 35 V14 H214 M176 35 V56 H214"/><rect x="214" y="6" width="20" height="16"/><rect x="214" y="48" width="20" height="16"/>
+          </svg>
+        </div>
+        <dl class="kv">
+          <dt>Approved</dt><dd>rev B by reviewer · 22 Sep 2026, 11:04</dd>
+          <dt>File</dt><dd>CP-PID-8F45-001_revB.dxf · 532 KB</dd>
+        </dl>
+        <div class="mbtns">
+          <span class="mbtn primary">Download DXF</span>
+          <span class="mbtn">Open in CadPilot ↗</span>
+          <span class="mbtn">Refresh status</span>
+        </div>
+        <span class="mstate ok">Received from CadPilot 22 Sep 2026, 11:04</span>
+      </div>
+    </div>
+  </div>
+
+  <h3>Behaviour</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Element</th><th>Rule</th></tr></thead>
+    <tbody>
+      <tr><td>Project name</td><td>Pre-fill from the record (customer + capacity). Required, ≤ 120 chars.</td></tr>
+      <tr><td>File inputs</td><td><code>accept=".xlsx"</code>. Reject other extensions in the UI and on the backend. Both are required for the first send; either one is optional for <em>Replace workbooks</em>. Show the chosen filename.</td></tr>
+      <tr><td>Send to CadPilot</td><td>Disabled until both files are chosen. While sending, show "Uploading and reading workbooks…" (it can take 5–20 s) and disable the button. On success, switch to state B. On a 400, show CadPilot's message under the form.</td></tr>
+      <tr><td>Open / Continue in CadPilot</td><td>A plain <code>&lt;a href="{launch_url}" target="_blank" rel="noopener"&gt;</code>. Don't add query parameters and don't build it yourself; always use the stored <code>launch_url</code>.</td></tr>
+      <tr><td>Status refresh</td><td>Call <code>GET /api/records/:id/pid</code> on page load, on <em>Refresh status</em>, and on the <code>visibilitychange</code> event when the tab becomes visible (the user returns from CadPilot). Optionally poll every 30 s while <code>state</code> is <code>in_review</code>; don't poll faster.</td></tr>
+      <tr><td>Preview</td><td><code>&lt;img src="/api/records/:id/pid/preview.svg?rev=B"&gt;</code>. Include the revision in the URL so a new approval isn't served from cache. Click opens it full size in a new tab.</td></tr>
+      <tr><td>Download DXF</td><td><code>&lt;a href="/api/records/:id/pid/dxf"&gt;</code>. The backend sets the filename.</td></tr>
+      <tr><td>Replace workbooks</td><td>Re-opens the form with both inputs optional and posts to the same route. The existing CadPilot project is updated; if a draft already exists, the engineer regenerates it in CadPilot (Design data → Regenerate).</td></tr>
+      <tr><td>Newer draft after approval</td><td>When <code>current_revision</code> ≠ <code>approved.revision</code>, keep showing the approved DXF and add a note: "Rev C in review in CadPilot".</td></tr>
+      <tr><td>Errors</td><td>If the backend returns <code>stale: true</code>, show "Could not reach CadPilot, showing last known status" but keep the buttons working.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============================================================ -->
+<section id="code">
+  <h2><span class="n">09</span>Reference code</h2>
+  <p class="sub">A complete working CRM backend in Node 18+ (Express + multer). Adapt the storage and permission checks to your stack.</p>
+
+  <div class="codehead"><span>crm-backend/cadpilot.js</span><span class="lang">JavaScript</span></div>
+<pre><code>// npm i express multer
+const express = require("express");
+const multer = require("multer");
+const crypto = require("crypto");
+const fs = require("fs/promises");
+const path = require("path");
+
+const CADPILOT_URL = process.env.CADPILOT_URL.replace(/\/$/, "");
+const API_KEY = process.env.CADPILOT_CRM_API_KEY;
+const SECRET = process.env.CADPILOT_WEBHOOK_SECRET;
+const CRM_PUBLIC_URL = process.env.CRM_PUBLIC_URL.replace(/\/$/, "");
+const USE_WEBHOOK = process.env.CADPILOT_USE_WEBHOOK !== "false";
+const DXF_DIR = process.env.DXF_DIR || "./dxf-store";
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+const router = express.Router();
+
+// ---- replace with your database ------------------------------------------------------------
+const db = new Map(); // record_id -&gt; row (see "CRM data model")
+const getRow = async (id) =&gt; db.get(id) || null;
+const saveRow = async (row) =&gt; { db.set(row.record_id, { ...row, updated_at: new Date().toISOString() }); return db.get(row.record_id); };
+
+function cadpilot(p, init = {}) {
+  return fetch(CADPILOT_URL + p, {
+    ...init,
+    headers: { "X-API-Key": API_KEY, ...(init.headers || {}) },
+    signal: AbortSignal.timeout(120_000),
+  });
+}
+
+function view(row) {
+  if (!row) return { state: "none" };
+  return {
+    record_id: row.record_id, project_id: row.project_id, state: row.state, launch_url: row.launch_url,
+    files: { mass_balance: row.mass_balance_name, design_data: row.design_data_name },
+    current_revision: row.current_revision || null,
+    approved: row.approved_revision ? {
+      revision: row.approved_revision, approved_by: row.approved_by, approved_at: row.approved_at,
+      dxf_filename: row.dxf_filename, received_via: row.received_via,
+    } : null,
+    stale: !!row.stale,
+  };
+}
+
+// ---- 1. Send the workbooks ---------------------------------------------------------------------
+router.post("/api/records/:id/pid",
+  upload.fields([{ name: "mass_balance", maxCount: 1 }, { name: "design_data", maxCount: 1 }]),
+  async (req, res) =&gt; {
+    const id = req.params.id; // TODO: check the logged-in user may edit this record
+    const files = req.files || {};
+    for (const role of ["mass_balance", "design_data"]) {
+      const f = files[role]?.[0];
+      if (f &amp;&amp; !f.originalname.toLowerCase().endsWith(".xlsx")) return res.status(400).json({ error: `${f.originalname}: only .xlsx is supported` });
+    }
+    const form = new FormData();
+    form.set("external_id", id);
+    form.set("name", req.body.name || "");
+    form.set("request", req.body.request || "");
+    form.set("return_url", `${CRM_PUBLIC_URL}/records/${encodeURIComponent(id)}`);
+    if (USE_WEBHOOK) form.set("callback_url", `${CRM_PUBLIC_URL}/webhooks/cadpilot`);
+    for (const role of ["mass_balance", "design_data"]) {
+      const f = files[role]?.[0];
+      if (f) form.set(role, new Blob([f.buffer]), f.originalname);
+    }
+    const r = await cadpilot("/api/integrations/crm/projects", { method: "POST", body: form });
+    const out = await r.json().catch(() =&gt; ({}));
+    if (r.status === 400) return res.status(400).json({ error: out.detail });
+    if (!r.ok) return res.status(502).json({ error: "CadPilot integration misconfigured (" + r.status + ")" });
+
+    const prev = (await getRow(id)) || { record_id: id, created_at: new Date().toISOString() };
+    const row = await saveRow({
+      ...prev,
+      project_id: out.project_id, launch_url: out.launch_url, state: out.state,
+      mass_balance_name: out.sources.mass_balance, design_data_name: out.sources.design_data,
+      current_revision: out.current_revision,
+    });
+    res.json(view(row));
+  });
+
+// ---- 2. Status (refreshes from CadPilot) -------------------------------------------------------
+router.get("/api/records/:id/pid", async (req, res) =&gt; {
+  const row = await getRow(req.params.id);
+  if (!row) return res.json(view(null));
+  try {
+    const r = await cadpilot(`/api/integrations/crm/projects/${encodeURIComponent(row.record_id)}`);
+    if (!r.ok) throw new Error("status " + r.status);
+    const s = await r.json();
+    const ap = s.approved_revision;
+    Object.assign(row, { state: s.state, current_revision: s.current_revision, launch_url: s.launch_url, stale: false });
+    if (ap &amp;&amp; ap.revision !== row.approved_revision) {
+      // approved but the webhook hasn't delivered this revision (yet): pull it
+      Object.assign(row, { approved_revision: ap.revision, approved_by: ap.approved_by, approved_at: ap.approved_at,
+                           dxf_url: ap.dxf_url, svg_url: ap.svg_url, dxf_storage_key: null });
+      await pullDxf(row);
+    }
+    res.json(view(await saveRow(row)));
+  } catch {
+    res.json(view({ ...row, stale: true }));
+  }
+});
+
+async function pullDxf(row) {
+  const r = await cadpilot(`/api/integrations/crm/projects/${encodeURIComponent(row.record_id)}/dxf`);
+  if (!r.ok) return;
+  const name = /filename="([^"]+)"/.exec(r.headers.get("content-disposition") || "")?.[1] || `${row.record_id}.dxf`;
+  await storeDxf(row, name, Buffer.from(await r.arrayBuffer()), "pull");
+}
+
+async function storeDxf(row, filename, buf, via) {
+  await fs.mkdir(DXF_DIR, { recursive: true });
+  const key = `${row.record_id.replace(/[^\w.-]/g, "_")}_rev${row.approved_revision}.dxf`;
+  await fs.writeFile(path.join(DXF_DIR, key), buf); // or upload to S3
+  Object.assign(row, { dxf_filename: filename, dxf_storage_key: key, dxf_size: buf.length, received_via: via });
+}
+
+// ---- 3. Download --------------------------------------------------------------------------------
+router.get("/api/records/:id/pid/dxf", async (req, res) =&gt; {
+  const row = await getRow(req.params.id);
+  if (!row?.approved_revision) return res.status(409).json({ error: "Not approved yet" });
+  if (!row.dxf_storage_key) { await pullDxf(row); await saveRow(row); }
+  if (!row.dxf_storage_key) return res.status(502).json({ error: "Could not fetch the DXF from CadPilot" });
+  res.set("Content-Type", "application/dxf");
+  res.set("Content-Disposition", `attachment; filename="${row.dxf_filename}"`);
+  res.send(await fs.readFile(path.join(DXF_DIR, row.dxf_storage_key)));
+});
+
+// ---- 4. Preview ---------------------------------------------------------------------------------
+router.get("/api/records/:id/pid/preview.svg", async (req, res) =&gt; {
+  const row = await getRow(req.params.id);
+  if (!row?.svg_url) return res.status(404).end();
+  const r = await fetch(row.svg_url, { signal: AbortSignal.timeout(60_000) });
+  if (!r.ok) return res.status(502).end();
+  res.set("Content-Type", "image/svg+xml").set("Cache-Control", "private, max-age=300");
+  res.send(Buffer.from(await r.arrayBuffer()));
+});
+
+// ---- 5. Webhook (mount BEFORE any global express.json()) ----------------------------------------
+router.post("/webhooks/cadpilot", express.raw({ type: "application/json", limit: "30mb" }), async (req, res) =&gt; {
+  const ts = req.get("X-CadPilot-Timestamp") || "";
+  const got = req.get("X-CadPilot-Signature") || "";
+  const expected = "sha256=" + crypto.createHmac("sha256", SECRET).update(ts + ".").update(req.body).digest("hex");
+  const fresh = Math.abs(Date.now() / 1000 - Number(ts)) &lt;= 300;
+  if (!fresh || got.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(got), Buffer.from(expected)))
+    return res.sendStatus(401);
+
+  const msg = JSON.parse(req.body.toString("utf8"));
+  if (msg.event !== "drawing.approved") return res.sendStatus(200);
+  const row = (await getRow(msg.external_id)) || { record_id: msg.external_id, created_at: new Date().toISOString() };
+  Object.assign(row, {
+    project_id: msg.project_id, launch_url: msg.launch_url, state: "approved",
+    approved_revision: msg.revision, approved_by: msg.approved_by, approved_at: msg.approved_at,
+    dxf_url: msg.dxf.url, svg_url: msg.svg_url,
+  });
+  await storeDxf(row, msg.dxf.filename, Buffer.from(msg.dxf.content_base64, "base64"), "webhook"); // same rev twice = overwrite
+  await saveRow(row);
+  res.sendStatus(200);
+});
+
+// ---- 6. Optional: resend ------------------------------------------------------------------------
+router.post("/api/records/:id/pid/redeliver", async (req, res) =&gt; {
+  const r = await cadpilot(`/api/integrations/crm/projects/${encodeURIComponent(req.params.id)}/redeliver`, { method: "POST" });
+  res.status(r.status).json(await r.json().catch(() =&gt; ({})));
+});
+
+module.exports = router;
+// app.js:  app.use(require("./cadpilot"));  app.use(express.json());  // webhook router first</code></pre>
+
+  <h3>Webhook check in other languages</h3>
+  <div class="codehead"><span>Python (FastAPI / Flask)</span><span class="lang">Python</span></div>
+<pre><code>import hashlib, hmac, time
+
+def verify(raw: bytes, ts: str, sig: str, secret: str) -&gt; bool:
+    if not ts.isdigit() or abs(time.time() - int(ts)) &gt; 300:
+        return False
+    expected = "sha256=" + hmac.new(secret.encode(), ts.encode() + b"." + raw, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, sig)</code></pre>
+
+  <div class="codehead"><span>PHP (Laravel)</span><span class="lang">PHP</span></div>
+<pre><code>$raw = $request-&gt;getContent();
+$ts  = $request-&gt;header('X-CadPilot-Timestamp', '');
+$sig = $request-&gt;header('X-CadPilot-Signature', '');
+$expected = 'sha256=' . hash_hmac('sha256', $ts . '.' . $raw, env('CADPILOT_WEBHOOK_SECRET'));
+if (abs(time() - (int) $ts) &gt; 300 || !hash_equals($expected, $sig)) abort(401);</code></pre>
+
+  <h3>UI calls (framework-agnostic)</h3>
+  <div class="codehead"><span>record-pid-panel.js</span><span class="lang">JavaScript</span></div>
+<pre><code>const base = (id) =&gt; `/api/records/${encodeURIComponent(id)}/pid`;
+
+export async function sendToCadPilot(recordId, { name, request, massBalance, designData }) {
+  const fd = new FormData();
+  fd.set("name", name);
+  if (request) fd.set("request", request);
+  if (massBalance) fd.set("mass_balance", massBalance);   // File from &lt;input type="file"&gt;
+  if (designData) fd.set("design_data", designData);
+  const r = await fetch(base(recordId), { method: "POST", body: fd });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || `Upload failed (${r.status})`);
+  return data;                                          // { state, launch_url, ... }
+}
+
+export async function loadStatus(recordId) {
+  const r = await fetch(base(recordId));
+  return r.json();                                      // { state: "none" | "draft_pending" | "in_review" | "approved", ... }
+}
+
+// refresh when the user comes back from the CadPilot tab
+export function refreshOnReturn(recordId, render) {
+  document.addEventListener("visibilitychange", async () =&gt; {
+    if (document.visibilityState === "visible") render(await loadStatus(recordId));
+  });
+}
+
+// links
+export const dxfHref = (id) =&gt; `${base(id)}/dxf`;
+export const previewSrc = (id, rev) =&gt; `${base(id)}/preview.svg?rev=${encodeURIComponent(rev)}`;</code></pre>
+
+  <div class="note">
+    <p><strong>A runnable example is in the CadPilot repository</strong> under <code>crm-test/</code>: a test CRM with an HTML/JS page (<code>public/</code>) and a zero-dependency Node backend (<code>server.mjs</code>) that implements all of the above. Run it with <code>CADPILOT_URL=… CADPILOT_CRM_API_KEY=… CADPILOT_CRM_WEBHOOK_SECRET=… node server.mjs</code> and open <code>http://localhost:4000</code>.</p>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="cadpilot-side">
+  <h2><span class="n">10</span>What the CRM user sees in CadPilot</h2>
+  <p class="sub">None of this needs CRM code. It is here so the CRM team can explain it to users.</p>
+  <ol>
+    <li><strong>New P&amp;ID draft page</strong> (first visit): the project name and both workbooks are pre-filled, marked "received from the CRM". The user can rename the project, replace a workbook and edit the instruction.</li>
+    <li>They choose <strong>Plant sections</strong>: <em>Detect from the workbooks</em> (recommended) or <em>Choose the sections myself</em>. They also choose the <strong>Draft engine</strong>: Rules (recommended) or LLM planner.</li>
+    <li><strong>Generate draft</strong>. Nothing is generated before this click.</li>
+    <li>The workspace shows a banner: "From CRM record LEAD-1001 · When you approve, the DXF is sent to the CRM automatically", plus <strong>← Back to CRM</strong> (<code>return_url</code>).</li>
+    <li>They correct the drawing in chat (each correction makes a new revision A, B, C…) and click <strong>Approve</strong>. The banner then shows "Revision B DXF delivered to the CRM", or "Delivery failed · Send again".</li>
+    <li>Opening <code>launch_url</code> again later goes straight to the workspace.</li>
+  </ol>
+</section>
+
+<!-- ============================================================ -->
+<section id="test">
+  <h2><span class="n">11</span>Acceptance checklist</h2>
+  <p class="sub">Run these against the real CadPilot EC2 before go-live.</p>
+  <ul class="checklist">
+    <li>From the CRM EC2, <code>curl $CADPILOT_URL/api/health</code> returns <code>"ok":true</code>.</li>
+    <li>Sending a record with both workbooks returns <code>created: true</code>, <code>state: draft_pending</code>, and a <code>launch_url</code> that starts with the public CadPilot address (not localhost).</li>
+    <li>Sending the same record again returns the same <code>project_id</code> with <code>created: false</code>.</li>
+    <li>A <code>.xls</code>/<code>.csv</code> file is rejected in the UI and by the backend. A corrupt <code>.xlsx</code> shows CadPilot's 400 message.</li>
+    <li>A wrong API key gives the user a clear "integration misconfigured" error, not a stack trace.</li>
+    <li><em>Open in CadPilot</em> shows the pre-filled New P&amp;ID draft page, and nothing is generated until <em>Generate draft</em> is clicked.</li>
+    <li>After approval, the CRM receives the webhook (check the logs), the signature is valid, and the DXF is stored.</li>
+    <li>The record shows <em>Approved · rev X</em>, the preview renders, and <em>Download DXF</em> saves a file that opens in AutoCAD / DWG TrueView.</li>
+    <li>A webhook with a changed body or an old timestamp is rejected with 401.</li>
+    <li>With the webhook blocked (or <code>CADPILOT_USE_WEBHOOK=false</code>), <em>Refresh status</em> still ends in <em>Approved</em> and the DXF downloads (pull path).</li>
+    <li>Approving a second revision in CadPilot updates the CRM to the new revision; the same revision delivered twice doesn't create duplicates.</li>
+    <li><em>← Back to CRM</em> in CadPilot lands on the right record.</li>
+  </ul>
+</section>
+
+<!-- ============================================================ -->
+<section id="trouble">
+  <h2><span class="n">12</span>Troubleshooting</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
+    <tbody>
+      <tr><td>CadPilot returns <code>503</code></td><td>Integration off on CadPilot</td><td>The CadPilot team sets <code>CADPILOT_CRM_API_KEY</code> and redeploys</td></tr>
+      <tr><td>CadPilot returns <code>401</code></td><td>The keys differ</td><td>Copy the exact key to <code>CADPILOT_CRM_API_KEY</code> on the CRM, with no spaces or newline</td></tr>
+      <tr><td><code>launch_url</code> points to localhost</td><td><code>CADPILOT_PUBLIC_URL</code> wrong on CadPilot</td><td>The CadPilot team sets the real address and redeploys; then send the record again to get fresh links</td></tr>
+      <tr><td>Connection timeout from the CRM</td><td>Security group</td><td>Allow the CRM EC2's IP on 80/443 at CadPilot</td></tr>
+      <tr><td>Webhook never arrives; CadPilot shows "Delivery failed"</td><td>CadPilot can't reach <code>CRM_PUBLIC_URL</code>, or the route returns non-2xx</td><td>Open the port to the CadPilot IP, check the CRM logs, then <em>Send again</em> (or call <code>redeliver</code>). The pull path covers it meanwhile.</td></tr>
+      <tr><td>Webhook returns 401 at the CRM</td><td>The body was parsed before verification, or the secrets differ</td><td>Verify the <em>raw</em> body; mount the webhook route before <code>express.json()</code>; compare the secrets</td></tr>
+      <tr><td>Webhook returns 413 at the CRM</td><td>Body size limit</td><td>Raise the limit to 30 MB on the route and any proxy (nginx <code>client_max_body_size</code>)</td></tr>
+      <tr><td>The preview image is broken</td><td>No approval yet, or <code>svg_url</code> has the wrong host</td><td>Check <code>state</code>; fix <code>CADPILOT_PUBLIC_URL</code></td></tr>
+      <tr><td>New workbooks sent but the drawing didn't change</td><td>A draft already existed</td><td>In CadPilot: Design data → Regenerate</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="note err">
+    <p><strong>Security note.</strong> CadPilot does not have user login yet. Anyone who can reach the CadPilot site and has a <code>launch_url</code> can open that project. Restrict CadPilot's security group to office/VPN ranges, or place it behind the company SSO proxy, before using real customer data.</p>
+  </div>
+</section>
+
+<footer>CadPilot ↔ CRM integration · API version 1 (<code>X-CadPilot-Event: drawing.approved</code>). Questions go to the CadPilot team.</footer>
+</main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default" });</script>
+</body>
+</html>

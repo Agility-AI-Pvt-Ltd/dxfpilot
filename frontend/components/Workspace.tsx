@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, streamPost, type Engine, type Project, type ProgressEvent, type Revision } from "@/lib/api";
 import Chat from "./Chat";
+import CrmBanner from "./CrmBanner";
 import DataPanel from "./DataPanel";
 import Inspector from "./Inspector";
 import { ChangesPanel, DecisionsPanel, ListsPanel, ValidationPanel } from "./Panels";
@@ -103,6 +104,8 @@ export default function Workspace({ projectId, initialRequest, initialEngine, in
     started.current = true;
     refresh().then((p) => {
       if (p.current) return;
+      // A CRM hand-over never drafts by itself: only after the reviewer chose the options and clicked Generate
+      if (p.integration && !initialRequest) return;
       if (p.source_summary?.equipment_rows) run(`/api/projects/${projectId}/generate`, {
           request: initialRequest || "Generate the P&ID",
           engine: initialEngine,
@@ -125,10 +128,36 @@ export default function Workspace({ projectId, initialRequest, initialEngine, in
   const approve = async () => {
     if (!rev) return;
     try {
-      await api.approve(projectId, rev.revision);
+      const res = await api.approve(projectId, rev.revision);
       await refresh(rev.revision);
+      if (res.delivering) followDelivery(rev.revision);
       setRev(await api.revision(projectId, rev.revision));
       setSvg(await api.svg(projectId, rev.revision));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  /** The drawing is sent to the CRM in the background: poll until its delivery is recorded. */
+  const followDelivery = useCallback(
+    (letter: string) => {
+      const since = project?.integration?.deliveries.length ?? 0;
+      let tries = 0;
+      const tick = async () => {
+        const p = await api.project(projectId).catch(() => null);
+        if (p) setProject(p);
+        const done = p?.integration?.deliveries.slice(since).some((d) => d.revision === letter);
+        if (!done && ++tries < 30) setTimeout(tick, 2000);
+      };
+      setTimeout(tick, 1500);
+    },
+    [projectId, project],
+  );
+
+  const redeliver = async () => {
+    try {
+      const res = await api.redeliver(projectId);
+      followDelivery(res.revision);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -144,7 +173,7 @@ export default function Workspace({ projectId, initialRequest, initialEngine, in
   const v = rev?.validation.summary;
 
   return (
-    <div className="app">
+    <div className={`app${project?.integration ? " with-banner" : ""}`}>
       <header className="topbar">
         <button className="btn small side-toggle" onClick={toggleSidebar} aria-label={sidebar ? "Hide drafts and versions" : "Show drafts and versions"} aria-expanded={sidebar} title="Drafts and versions">
           ☰
@@ -187,6 +216,8 @@ export default function Workspace({ projectId, initialRequest, initialEngine, in
           </>
         )}
       </header>
+
+      {project?.integration && <CrmBanner integration={project.integration} approved={status === "approved"} onRedeliver={redeliver} />}
 
       <div className={`body${sidebar ? "" : " collapsed"}`}>
       <Sidebar

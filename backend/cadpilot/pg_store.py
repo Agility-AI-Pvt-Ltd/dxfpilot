@@ -32,6 +32,7 @@ from .model.intent import ChangeRequest, DesignIntent
 from .engine.tags import TagRegistry
 from .store import (
     ChatMessage,
+    Integration,
     ProjectRecord,
     ProjectStore,
     ProjectSummary,
@@ -151,6 +152,14 @@ MIGRATIONS: list[tuple[int, str]] = [
         ALTER TABLE projects ADD COLUMN table_overrides jsonb NOT NULL DEFAULT '[]';
         """,
     ),
+    (
+        4,
+        """
+        ALTER TABLE projects ADD COLUMN integration jsonb;
+        CREATE UNIQUE INDEX projects_external ON projects ((integration->>'source'), (integration->>'external_id'))
+            WHERE integration IS NOT NULL;
+        """,
+    ),
 ]
 
 
@@ -219,6 +228,14 @@ class PostgresStore(ProjectStore):
             )
         return rec
 
+    def find_external(self, source: str, external_id: str) -> str | None:
+        with self.tx() as conn:
+            row = conn.execute(
+                "SELECT id FROM projects WHERE integration->>'source' = %s AND integration->>'external_id' = %s",
+                (source, external_id),
+            ).fetchone()
+        return row["id"] if row else None
+
     def list_projects(self) -> list[ProjectSummary]:
         with self.tx() as conn:
             rows = conn.execute(
@@ -250,6 +267,7 @@ class PostgresStore(ProjectStore):
             intent=DesignIntent.model_validate(p["intent"]),
             registry=TagRegistry.model_validate(p["tag_registry"]),
             table_overrides=[TableOverride.model_validate(o) for o in p["table_overrides"]],
+            integration=Integration.model_validate(p["integration"]) if p["integration"] else None,
             revisions=revs,
             chat=[
                 ChatMessage(role=m["role"], text=m["text"], at=_iso(m["created_at"]), revision=m["revision"], data=m["data"])
@@ -267,9 +285,10 @@ class PostgresStore(ProjectStore):
         pid = rec.info.id
         cur = conn.execute(
             "UPDATE projects SET name = %s, info = %s, intent = %s, tag_registry = %s, table_overrides = %s,"
-            " updated_at = now() WHERE id = %s",
+            " integration = %s, updated_at = now() WHERE id = %s",
             (rec.info.name, _j(rec.info), _j(rec.intent), _j(rec.registry),
-             Jsonb([o.model_dump(mode="json") for o in rec.table_overrides]), pid),
+             Jsonb([o.model_dump(mode="json") for o in rec.table_overrides]),
+             _j(rec.integration) if rec.integration else None, pid),
         )
         if cur.rowcount == 0:
             raise KeyError(pid)

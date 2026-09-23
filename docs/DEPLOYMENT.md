@@ -75,6 +75,11 @@ SITE_ADDRESS=:80            # or your domain for automatic HTTPS
 LANGSMITH_TRACING=true
 LANGSMITH_API_KEY=<your LangSmith key>
 LANGSMITH_PROJECT=cadpilot
+
+# optional: CRM integration (docs/CRM_INTEGRATION.md)
+CADPILOT_PUBLIC_URL=http://<instance IP or domain>
+CADPILOT_CRM_API_KEY=<openssl rand -hex 32>
+CADPILOT_CRM_WEBHOOK_SECRET=<openssl rand -hex 32>
 ```
 
 `POSTGRES_PASSWORD` is applied when the database volume is **first** created. To change it later:

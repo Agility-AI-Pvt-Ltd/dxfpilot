@@ -21,8 +21,8 @@ from .instrumentation import rule_applies
 from .llm import get_llm, mark_source
 
 AGENT = "llm_planner"
-MAX_ATTEMPTS = 8  # hard cap: 1 plan + up to 7 corrections (only failing sections are re-sent)
-NO_PROGRESS_LIMIT = 2  # stop early when this many corrections in a row fail to beat the best plan
+MAX_ATTEMPTS = 14  # hard cap: 1 plan + up to 13 corrections (only failing sections are re-sent)
+NO_PROGRESS_LIMIT = 5  # stop early when this many corrections in a row fail to beat the best plan
 PLANNER_TIMEOUT_S = 150  # a full plan is a large structured output
 
 SYSTEM = """You are the P&ID planner of CadPilot, an engineering drafting system for dairy plants.

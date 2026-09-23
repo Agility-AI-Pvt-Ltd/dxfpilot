@@ -3,10 +3,10 @@
 START → plan → {process ∥ equipment} → reconcile ─┬─ rules engine:  topology → instrumentation → merge ─┐
                                                   └─ LLM planner:   llm_planner → compile_ir ───────────┤
       validate ─┬─ rules:   (replan → worker … | finalize)                                               ◄┘
-                └─ planner: (fail and attempts < 3 → llm_planner with the errors | finalize) → layout → render → END
+                └─ planner: (fail and attempts < MAX_ATTEMPTS → llm_planner with the errors | finalize) → layout → render → END
 
 The LLM planner (experimental, DesignIntent.engine = "llm_planner") proposes a P&ID IR that is compiled
-deterministically and checked by the same validator; after 3 failed attempts the draft is committed as
+deterministically and checked by the same validator; once the attempts run out the draft is committed as
 needs_attention for human review. If the model is unavailable the rules engine takes over.
 
 Process and Equipment work in parallel; Topology needs both (it connects the equipment in the

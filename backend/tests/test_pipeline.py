@@ -577,3 +577,18 @@ def test_wrong_manual_mapping_warns_and_is_not_second_guessed(pilot):
     data = pilot.store.source_data(pid)
     assert not data.equipment_rows  # the reviewer's choice is respected ...
     assert any("reads no equipment rows" in w for w in data.warnings)  # ... and they are told why nothing was read
+
+
+def test_integration_link_is_stored_and_found_by_external_id(store):
+    from cadpilot.store import Delivery, Integration
+
+    rec = store.create("crm")
+    other = store.create("local")
+    assert store.find_external("crm", "LEAD-1") is None
+    rec.integration = Integration(external_id="LEAD-1", callback_url="https://crm.example.com/hook")
+    rec.integration.deliveries.append(Delivery(revision="A", ok=True, http_status=200))
+    store.save(rec)
+    assert store.find_external("crm", "LEAD-1") == rec.info.id
+    assert store.find_external("crm", "LEAD-2") is None and store.get(other.info.id).integration is None
+    back = store.get(rec.info.id).integration
+    assert back.callback_url == "https://crm.example.com/hook" and back.deliveries[0].http_status == 200

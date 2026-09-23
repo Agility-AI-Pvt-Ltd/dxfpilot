@@ -223,7 +223,7 @@ def test_best_attempt_is_what_the_reviewer_gets(pilot, reference, monkeypatch):
     pid, _ = planner_project(pilot, monkeypatch, broken, [worse, worse])
     rev = pilot.run_generation(pid, REQUEST, engine="llm_planner")
     meta = rev.model.metadata["planner"]
-    assert meta["best_attempt"] == 1 and meta["attempts"] == 3
+    assert meta["best_attempt"] == 1 and meta["attempts"] == 1 + planner_mod.NO_PROGRESS_LIMIT
     assert len(rev.validation.errors) == len(history_errors := meta["history"][0]["errors"]) and history_errors
 
 

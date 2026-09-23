@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
 import threading
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import FastAPI, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from ..ingest.excel import TableOverride
+from ..integrations import crm
 from ..service import CadPilot
 from ..standards import MODULE_PREFIX, get_standards, module_ids
 
@@ -28,7 +30,9 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="CadPilot API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    # CADPILOT_CORS_ORIGINS: extra browser origins (comma-separated), e.g. the CRM's web address
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"]
+    + [o.strip().rstrip("/") for o in os.environ.get("CADPILOT_CORS_ORIGINS", "").split(",") if o.strip()],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -51,6 +55,10 @@ def _lock(pid: str) -> threading.Lock:
 class CreateProject(BaseModel):
     name: str
     demo_data: bool = False
+
+
+class RenameProject(BaseModel):
+    name: str
 
 
 class GenerateRequest(BaseModel):
@@ -94,6 +102,16 @@ def _project_view(pid: str) -> dict[str, Any]:
         "intent": rec.intent.model_dump(),
         "modules": module_ids(rec.intent.template) if rec.intent.template.startswith(MODULE_PREFIX) else [],
         "table_overrides": [o.model_dump() for o in rec.table_overrides],
+        "integration": None
+        if rec.integration is None
+        else {
+            "source": rec.integration.source,
+            "external_id": rec.integration.external_id,
+            "return_url": rec.integration.return_url,
+            "request": rec.integration.request,
+            "has_callback": bool(rec.integration.callback_url),
+            "deliveries": [d.model_dump() for d in rec.integration.deliveries],
+        },
     }
 
 
@@ -153,6 +171,18 @@ def create_project(body: CreateProject) -> dict[str, Any]:
 @app.get("/api/projects/{pid}")
 def get_project(pid: str) -> dict[str, Any]:
     return _get(_project_view, pid)
+
+
+@app.patch("/api/projects/{pid}")
+def rename_project(pid: str, body: RenameProject) -> dict[str, Any]:
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "The project name cannot be empty")
+    with _lock(pid):
+        rec = _get(pilot().store.get, pid)
+        rec.info.name = name
+        pilot().store.save(rec)
+    return _project_view(pid)
 
 
 @app.post("/api/projects/{pid}/sources")
@@ -312,4 +342,137 @@ def approve(pid: str, rev: str) -> dict[str, Any]:
         r = _get(pilot().approve, pid, rev)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
-    return {"revision": r.revision, "status": r.status}
+    delivering = _deliver_in_background(pid, r.revision)
+    return {"revision": r.revision, "status": r.status, "delivering": delivering}
+
+
+# ---- CRM integration (see cadpilot/integrations/crm.py and docs/CRM_INTEGRATION.md) ----------
+
+def _deliver_in_background(pid: str, letter: str) -> bool:
+    """Send an approved drawing to the CRM that created the project. False if there is nowhere to send it."""
+    rec = pilot().store.get(pid)
+    if not (rec.integration and rec.integration.callback_url):
+        return False
+
+    def worker() -> None:
+        try:
+            d = crm.send(pilot(), pid, letter)  # network I/O outside the project lock
+        except Exception as exc:  # e.g. the drawing could not be exported
+            d = crm.Delivery(revision=letter, detail=f"{type(exc).__name__}: {exc}"[:300])
+        with _lock(pid):
+            crm.record(pilot(), pid, d)
+
+    threading.Thread(target=worker, daemon=True).start()
+    return True
+
+
+def _crm_auth(x_api_key: str | None, authorization: str | None) -> None:
+    key = x_api_key or (authorization[7:] if authorization and authorization.lower().startswith("bearer ") else None)
+    try:
+        crm.check_key(key)
+    except crm.IntegrationDisabled as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(401, str(exc)) from exc
+
+
+def _crm_project(external_id: str) -> str:
+    pid = pilot().store.find_external(crm.SOURCE, external_id)
+    if pid is None:
+        raise HTTPException(404, f"No project for CRM record {external_id!r}")
+    return pid
+
+
+@app.post("/api/integrations/crm/projects")
+async def crm_create_project(
+    external_id: str = Form(...),
+    name: str = Form(""),
+    callback_url: str | None = Form(None),
+    return_url: str | None = Form(None),
+    request: str = Form(""),
+    mass_balance: UploadFile | None = None,
+    design_data: UploadFile | None = None,
+    x_api_key: str | None = Header(None),
+    authorization: str | None = Header(None),
+) -> dict[str, Any]:
+    """The CRM hands over a record's two workbooks. Idempotent on external_id: sending the same
+    record again updates its project (new files replace the old ones) instead of creating another."""
+    _crm_auth(x_api_key, authorization)
+    files: dict[str, tuple[str, bytes]] = {}
+    for role, f in (("mass_balance", mass_balance), ("design_data", design_data)):
+        if f is None:
+            continue
+        if not (f.filename or "").lower().endswith(".xlsx"):
+            raise HTTPException(400, f"{f.filename}: only .xlsx workbooks are supported")
+        files[role] = (f.filename or f"{role}.xlsx", await f.read())
+    existing = pilot().store.find_external(crm.SOURCE, external_id.strip())
+    if existing is None and len(files) < 2:
+        raise HTTPException(400, "A new project needs both mass_balance and design_data (.xlsx)")
+    try:
+        with _lock(existing or f"crm:{external_id}"):
+            pid, created = crm.intake(pilot(), external_id, name, files, callback_url, return_url, request)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:  # unreadable workbook
+        raise HTTPException(400, f"Could not read the workbook: {exc}") from exc
+    out = crm.status(pilot(), pid)
+    out["created"] = created
+    out["status_url"] = f"{crm.public_url()}/api/integrations/crm/projects/{out['external_id']}"
+    return out
+
+
+@app.get("/api/integrations/crm/projects/{external_id}")
+def crm_project_status(external_id: str, x_api_key: str | None = Header(None), authorization: str | None = Header(None)) -> dict[str, Any]:
+    """Where the record's drawing is: draft_pending → in_review → approved (with DXF/SVG links)."""
+    _crm_auth(x_api_key, authorization)
+    return crm.status(pilot(), _crm_project(external_id))
+
+
+@app.get("/api/integrations/crm/projects/{external_id}/dxf")
+def crm_download_dxf(external_id: str, x_api_key: str | None = Header(None), authorization: str | None = Header(None)) -> Response:
+    """The latest approved drawing as DXF (409 while nothing is approved)."""
+    _crm_auth(x_api_key, authorization)
+    pid = _crm_project(external_id)
+    letter = crm.approved_revision(pilot(), pid)
+    if letter is None:
+        raise HTTPException(409, "No approved revision yet")
+    name, data = pilot().dxf(pid, letter)
+    return Response(data, media_type="application/dxf", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@app.post("/api/integrations/crm/projects/{external_id}/redeliver")
+def crm_redeliver(external_id: str, x_api_key: str | None = Header(None), authorization: str | None = Header(None)) -> dict[str, Any]:
+    _crm_auth(x_api_key, authorization)
+    return _redeliver(_crm_project(external_id))
+
+
+@app.post("/api/projects/{pid}/integration/redeliver")
+def redeliver(pid: str) -> dict[str, Any]:
+    """Workspace button: send the latest approved drawing to the CRM again."""
+    _get(pilot().store.get, pid)
+    return _redeliver(pid)
+
+
+def _redeliver(pid: str) -> dict[str, Any]:
+    letter = crm.approved_revision(pilot(), pid)
+    if letter is None:
+        raise HTTPException(409, "No approved revision yet")
+    if not _deliver_in_background(pid, letter):
+        raise HTTPException(409, "This project has no CRM callback URL")
+    return {"revision": letter, "delivering": True}
+
+
+@app.get("/api/integrations/crm/files/{pid}/{name}")
+def crm_file(pid: str, name: str, token: str = "") -> Response:
+    """Signed link to an approved drawing, for the CRM's web page (no API key in the browser)."""
+    letter, _, kind = name.rpartition(".")
+    if kind not in ("dxf", "svg") or not crm.check_file_token(pid, letter, kind, token):
+        raise HTTPException(404, "Not found")
+    rev = _get(pilot().store.revision, pid, letter)
+    if rev.status != "approved":
+        raise HTTPException(404, "Not found")
+    if kind == "svg":
+        return Response(pilot().svg(pid, letter, False), media_type="image/svg+xml",
+                        headers={"Content-Disposition": f'inline; filename="{pid}_rev{letter}.svg"'})
+    fname, data = pilot().dxf(pid, letter)
+    return Response(data, media_type="application/dxf", headers={"Content-Disposition": f'attachment; filename="{fname}"'})
